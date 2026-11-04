@@ -1,0 +1,1374 @@
+package dev.anvilcraft.thenextforge.gametest;
+
+import dev.anvilcraft.thenextforge.TheNextForge;
+import dev.anvilcraft.thenextforge.forging.*;
+import dev.anvilcraft.thenextforge.event.*;
+import dev.anvilcraft.thenextforge.init.ModDataComponents;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
+import net.neoforged.neoforge.event.RegisterGameTestsEvent;
+
+/**
+ * 26.1.2 版 GameTest：1.21.1 的 {@code @GameTest} 注解逐条改写为 lambda 注册。
+ */
+public final class ForgingGameTests {
+        private static final java.util.Set<String> eventDriven = java.util.Set.of(
+            "minecraft:lapis_lazuli", "minecraft:glow_ink_sac", "minecraft:echo_shard",
+            "minecraft:fermented_spider_eye", "minecraft:slime_ball", "minecraft:ender_pearl",
+            "minecraft:heart_of_the_sea", "anvilcraft:frost_metal_ingot", "anvilcraft:ember_metal_ingot",
+            "minecraft:wither_rose", "anvilcraft:negative_matter_nugget", "anvilcraft:void_matter",
+            "anvilcraft:amber", "anvilcraft:cursed_gold_ingot", "anvilcraft:sapphire", "anvilcraft:ruby",
+            "anvilcraft:topaz", "minecraft:breeze_rod", "minecraft:dragon_egg",
+            "minecraft:golden_carrot", "minecraft:enchanted_golden_apple"
+        );
+
+    private ForgingGameTests() {
+    }
+
+    public static void registerAll(RegisterGameTestsEvent event) {
+        TestRegistry.register(event, "success_rate_formula", helper -> {
+        helper.assertTrue(near(ForgingRules.successRate(0), 0.9), "level 0 should be 90%");
+        helper.assertTrue(near(ForgingRules.successRate(3), 0.9), "same tier keeps 90%");
+        helper.assertTrue(near(ForgingRules.successRate(4), 0.765), "level 4 drops to 76.5%");
+        helper.assertTrue(near(ForgingRules.successRate(6), 0.765), "same tier keeps 76.5%");
+        helper.assertTrue(near(ForgingRules.successRate(7), 0.65025), "level 7 drops to 65.03%");
+        helper.assertTrue(near(ForgingRules.successRate(10), 0.5527125), "level 10 is 55.27%");
+        helper.assertTrue(near(ForgingRules.successRate(11), 0.5527125 * 0.85), "level 11 drops again");
+        helper.assertTrue(near(ForgingRules.successRate(14), 0.3), "floor is 30%");
+        helper.assertTrue(near(ForgingRules.successRate(40), 0.3), "floor holds");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "material_detection", helper -> {
+        helper.assertTrue(
+            ForgingMaterial.ofAnvilBlock(Blocks.ANVIL.defaultBlockState()) == ForgingMaterial.BASE,
+            "vanilla anvil should be BASE"
+        );
+        helper.assertTrue(
+            ForgingMaterial.ofAnvilBlock(Blocks.CHIPPED_ANVIL.defaultBlockState()) == ForgingMaterial.BASE,
+            "chipped anvil should be BASE"
+        );
+        helper.assertTrue(
+            ForgingMaterial.ofGrindstoneBlock(Blocks.GRINDSTONE.defaultBlockState()) == ForgingMaterial.BASE,
+            "vanilla grindstone should be BASE"
+        );
+        BuiltInRegistries.BLOCK.getOptional(Identifier.fromNamespaceAndPath("anvilcraft", "royal_anvil"))
+            .ifPresent(block -> helper.assertTrue(
+                ForgingMaterial.ofAnvilBlock(block.defaultBlockState()) == ForgingMaterial.ROYAL,
+                "royal_anvil should be ROYAL"
+            ));
+        BuiltInRegistries.ITEM.getOptional(Identifier.fromNamespaceAndPath("anvilcraft", "anvil_hammer"))
+            .ifPresent(item -> helper.assertTrue(
+                ForgingMaterial.ofHammer(new ItemStack(item)) == ForgingMaterial.BASE,
+                "anvil_hammer should be BASE"
+            ));
+        helper.succeed();
+        });
+        TestRegistry.register(event, "target_kind_detection", helper -> {
+        helper.assertTrue(TargetKind.of(new ItemStack(Items.DIAMOND_SWORD)) == TargetKind.WEAPON, "sword is weapon");
+        helper.assertTrue(TargetKind.of(new ItemStack(Items.DIAMOND_PICKAXE)) == TargetKind.TOOL, "pickaxe is tool");
+        helper.assertTrue(TargetKind.of(new ItemStack(Items.DIAMOND_CHESTPLATE)) == TargetKind.ARMOR, "chestplate is armor");
+        helper.assertTrue(TargetKind.of(new ItemStack(Items.STICK)) == null, "stick is not forgeable");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "data_component_round_trip", helper -> {
+        ForgingData source = new ForgingData(2, 1, 0, -1, java.util.List.of("minecraft:quartz"), 1, 40, java.util.List.of("armadillo"), true);
+        var encoded = ForgingData.CODEC.encodeStart(net.minecraft.nbt.NbtOps.INSTANCE, source).getOrThrow();
+        ForgingData decoded = ForgingData.CODEC.parse(net.minecraft.nbt.NbtOps.INSTANCE, encoded).getOrThrow();
+        helper.assertTrue(decoded.equals(source), "codec should round trip");
+        helper.assertTrue(ModDataComponents.FORGING.get() != null, "forging component should be registered");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "attribute_upgrade_applies", helper -> {
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        int before = modifiers(sword);
+        String text = ForgingRules.applyUpgrade(sword, TargetKind.WEAPON, ForgingLine.ANVIL, 1, net.minecraft.util.RandomSource.create(42L));
+        int after = modifiers(sword);
+        helper.assertTrue(after > before, "weapon upgrade should add an attribute modifier");
+        helper.assertTrue(text != null && (text.contains("攻击力") || text.contains("实体触及")), "weapon anvil upgrade text should mention attack or reach");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "experience_cost_grows_every_five_levels", helper -> {
+        helper.assertTrue(ForgingRules.experienceCost(0) == 6, "level 0 costs 6");
+        helper.assertTrue(ForgingRules.experienceCost(10) == 46, "level 10 costs 46");
+        helper.assertTrue(ForgingRules.experienceCost(19) == 82, "level 19 costs 82");
+        helper.assertTrue(ForgingRules.experienceCost(20) == 129, "level 20 costs 129");
+        helper.assertTrue(ForgingRules.experienceCost(25) == 239, "level 25 costs 239");
+        helper.assertTrue(ForgingRules.experienceCost(40) == 1261, "level 40 costs 1261");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "destruction_roll_splits_evenly", helper -> {
+        var random = net.minecraft.util.RandomSource.create(7L);
+        int destroyed = 0;
+        for (int i = 0; i < 10000; i++) {
+            if (ForgingRules.destructionRoll(random)) destroyed++;
+        }
+        helper.assertTrue(destroyed > 4700 && destroyed < 5300, "destruction roll should be near 50%, got " + destroyed);
+        helper.succeed();
+        });
+        TestRegistry.register(event, "forge_rules_defaults_match_design", helper -> {
+        var rules = dev.anvilcraft.thenextforge.forging.ForgeRulesData.defaults();
+        var weaponAnvil = rules.kinds().get("WEAPON").get("ANVIL");
+        var attack = weaponAnvil.stream().filter(o -> o.effect().equals("attack")).findFirst().orElse(null);
+        var reach = weaponAnvil.stream().filter(o -> o.effect().equals("reach")).findFirst().orElse(null);
+        helper.assertTrue(attack != null && near(attack.min(), 0.05) && near(attack.max(), 0.10) && attack.weight() == 70,
+            "武器铁砧：攻击力 5%-10% 权重 70，实际 " + attack);
+        helper.assertTrue(reach != null && near(reach.min(), 0.10) && reach.weight() == 30,
+            "武器铁砧：实体触及 0.10 权重 30，实际 " + reach);
+        var weaponGrind = rules.kinds().get("WEAPON").get("GRINDSTONE");
+        var sweep = weaponGrind.stream().filter(o -> o.effect().equals("sweep")).findFirst().orElse(null);
+        helper.assertTrue(sweep != null && sweep.swordsOnly() && near(sweep.min(), 0.10), "横扫只对剑，实际 " + sweep);
+        var tool = rules.kinds().get("TOOL").get("ANVIL").getFirst();
+        helper.assertTrue(tool.effect().equals("mining") && near(tool.min(), 0.03) && near(tool.max(), 0.08),
+            "工具铁砧：挖掘速度 3%-8%，实际 " + tool);
+        var armor = rules.kinds().get("ARMOR").get("ANVIL");
+        helper.assertTrue(armor.stream().anyMatch(o -> o.effect().equals("armor_flat") && o.weight() == 50),
+            "装甲铁砧：50% 概率 +1 护甲");
+        helper.assertTrue(armor.stream().anyMatch(o -> o.effect().equals("durability") && near(o.min(), 0.05)),
+            "装甲铁砧：耐久 5%-10%");
+        var amulet = rules.kinds().get("AMULET").get("ANVIL").getFirst();
+        helper.assertTrue(amulet.effect().equals("amulet_damage") && near(amulet.min(), 0.01) && near(amulet.max(), 0.05),
+            "护符铁砧：伤害 1%-5%，实际 " + amulet);
+        helper.succeed();
+        });
+        TestRegistry.register(event, "forge_rules_json_round_trips", helper -> {
+        var defaults = dev.anvilcraft.thenextforge.forging.ForgeRulesData.defaults();
+        String json = dev.anvilcraft.thenextforge.forging.ForgeRulesData.toJson(defaults);
+        var parsed = dev.anvilcraft.thenextforge.forging.ForgeRulesData.parse(json);
+        helper.assertTrue(parsed.kinds().keySet().equals(defaults.kinds().keySet()),
+            "解析后对象集合一致：" + parsed.kinds().keySet());
+        var attack = parsed.kinds().get("WEAPON").get("ANVIL").stream()
+            .filter(o -> o.effect().equals("attack")).findFirst().orElse(null);
+        helper.assertTrue(attack != null && near(attack.min(), 0.05) && near(attack.max(), 0.10),
+            "解析后数值一致：" + attack);
+        helper.assertTrue(near(parsed.modelScale().perLevel(), 0.10), "解析后模型倍率一致");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "target_black_and_white_lists_are_data_driven", helper -> {
+        var forge = dev.anvilcraft.thenextforge.forging.ForgeRulesData.class;
+        try {
+            dev.anvilcraft.thenextforge.forging.ForgeRulesData.override(
+                dev.anvilcraft.thenextforge.forging.ForgeRulesData.parse(
+                    "{\"target_blacklist\": [\"minecraft:trident\"], \"kinds\": {}}"));
+            helper.assertTrue(TargetKind.of(new ItemStack(Items.TRIDENT)) == null, "黑名单里的三叉戟不能锻造");
+            helper.assertTrue(TargetKind.of(new ItemStack(Items.DIAMOND_SWORD)) == TargetKind.WEAPON,
+                "未列出的物品不受影响");
+            dev.anvilcraft.thenextforge.forging.ForgeRulesData.override(
+                dev.anvilcraft.thenextforge.forging.ForgeRulesData.parse(
+                    "{\"target_whitelist\": [\"#minecraft:swords\"], \"kinds\": {}}"));
+            helper.assertTrue(TargetKind.of(new ItemStack(Items.DIAMOND_SWORD)) == TargetKind.WEAPON,
+                "白名单标签内的剑可以锻造");
+            helper.assertTrue(TargetKind.of(new ItemStack(Items.DIAMOND_AXE)) == null,
+                "白名单外的斧头不能锻造");
+        } finally {
+            dev.anvilcraft.thenextforge.forging.ForgeRulesData.resetToDefaults();
+        }
+        helper.assertTrue(TargetKind.of(new ItemStack(Items.DIAMOND_AXE)) == TargetKind.TOOL,
+            "恢复默认后斧头重新可锻造");
+        helper.assertTrue(forge != null, "规则类可读");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "anvil_hammer_and_dragon_rod_count_as_tools", helper -> {
+        for (String id : new String[]{"anvilcraft:anvil_hammer", "anvilcraft:royal_anvil_hammer",
+            "anvilcraft:dragon_rod", "anvilcraft:royal_dragon_rod"}) {
+            ItemStack stack = itemById(id);
+            if (stack.isEmpty()) continue;
+            helper.assertTrue(TargetKind.of(stack) == TargetKind.TOOL,
+                id + " 应判定为工具，实际 " + TargetKind.of(stack));
+        }
+        helper.assertTrue(TargetKind.of(new ItemStack(Items.DIAMOND_SWORD)) == TargetKind.WEAPON,
+            "剑仍是武器");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "every_material_id_resolves_to_a_real_item", helper -> {
+        int checked = 0;
+        for (String id : dev.anvilcraft.thenextforge.forging.EmbedMaterials.table().keySet()) {
+            if (id.startsWith("#")) continue;
+            ItemStack stack = dev.anvilcraft.thenextforge.forging.EmbedMaterials.itemOf(id);
+            helper.assertTrue(!stack.isEmpty(), "材料表的 id 必须能解析为真实物品：" + id);
+            checked++;
+        }
+        helper.assertTrue(checked > 30, "至少要有 30 种材料被检查，实际 " + checked);
+
+        // 旋风棒 = minecraft:breeze_rod（Breeze Rod），不是风弹 minecraft:wind_charge
+        helper.assertTrue(dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(
+            new ItemStack(Items.BREEZE_ROD)) != null, "旋风棒（breeze_rod）必须可嵌入");
+        helper.assertTrue(!dev.anvilcraft.thenextforge.forging.EmbedMaterials.table()
+            .containsKey("minecraft:wind_charge"), "风弹不是旋风棒，不应登记在材料表里");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "embed_matrix_is_complete_and_consistent", helper -> {
+        ItemStack[] targets = {
+            new ItemStack(Items.DIAMOND_SWORD),      // WEAPON
+            new ItemStack(Items.DIAMOND_AXE),        // TOOL + WEAPON
+            new ItemStack(Items.DIAMOND_PICKAXE),    // TOOL
+            new ItemStack(Items.DIAMOND_CHESTPLATE), // ARMOR
+            new ItemStack(Items.TOTEM_OF_UNDYING)    // 任意护符以外的兜底（预期全 false）
+        };
+        String[] names = {"SWORD(W)", "AXE(T+W)", "PICK(T)", "ARMOR(A)", "OTHER"};
+        int rows = 0;
+        StringBuilder matrix = new StringBuilder();
+        for (var entry : dev.anvilcraft.thenextforge.forging.EmbedMaterials.table().entrySet()) {
+            if (entry.getKey().startsWith("#")) continue;
+            String id = entry.getKey();
+            var stack = dev.anvilcraft.thenextforge.forging.EmbedMaterials.itemOf(id);
+            if (stack.isEmpty()) continue;
+            var definition = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(stack);
+            if (definition == null) continue;
+            rows++;
+            StringBuilder line = new StringBuilder(String.format("%-40s", id));
+            for (int i = 0; i < targets.length; i++) {
+                boolean ok = dev.anvilcraft.thenextforge.forging.EmbedMaterials.allowsFor(definition, targets[i]);
+                line.append(String.format(" %s=%-5s", names[i], ok ? "YES" : "no"));
+            }
+            matrix.append(line).append("\n");
+        }
+        TheNextForge.LOGGER.info("[TNF-MATRIX] rows={}\n{}", rows, matrix);
+        var enderEye = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.ENDER_PEARL));
+        helper.assertTrue(enderEye != null, "末影珍珠必须在材料表里");
+        for (int i = 0; i < 4; i++) {
+            helper.assertTrue(
+                dev.anvilcraft.thenextforge.forging.EmbedMaterials.allowsFor(enderEye, targets[i]),
+                "末影珍珠必须能嵌进 " + names[i]);
+        }
+        helper.succeed();
+        });
+        TestRegistry.register(event, "every_embed_material_is_wired", helper -> {
+        int wired = 0;
+        int missing = 0;
+        for (var entry : dev.anvilcraft.thenextforge.forging.EmbedMaterials.all().entrySet()) {
+            String id = entry.getKey();
+            String[][] samples = {
+                {"TOOL", "minecraft:diamond_pickaxe"},
+                {"WEAPON", "minecraft:diamond_sword"},
+                {"ARMOR", "minecraft:diamond_chestplate"},
+                {"AMULET", "anvilcraft:armadillo_amulet"},
+            };
+            boolean visible = false;
+            for (String[] sample : samples) {
+                ItemStack stack = itemById(sample[1]);
+                if (stack.isEmpty()) continue;
+                int beforeMods = stack.getOrDefault(net.minecraft.core.component.DataComponents.ATTRIBUTE_MODIFIERS,
+                    net.minecraft.world.item.component.ItemAttributeModifiers.EMPTY).modifiers().size();
+                int beforeMax = stack.getMaxDamage();
+                boolean unit = stack.has(net.minecraft.core.component.DataComponents.UNBREAKABLE);
+                dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(
+                    stack, entry.getValue(), TargetKind.valueOf(sample[0]), 1, helper.getLevel()
+                );
+                int afterMods = stack.getOrDefault(net.minecraft.core.component.DataComponents.ATTRIBUTE_MODIFIERS,
+                    net.minecraft.world.item.component.ItemAttributeModifiers.EMPTY).modifiers().size();
+                if (afterMods > beforeMods || stack.getMaxDamage() != beforeMax
+                    || stack.has(net.minecraft.core.component.DataComponents.UNBREAKABLE) != unit) {
+                    visible = true;
+                }
+            }
+            boolean flagOnly = "anvilcraft:transcendium_nugget".equals(id);
+                        boolean eventOnly = false;
+            for (String[] sample : samples) {
+                if (dev.anvilcraft.thenextforge.forging.EmbedMaterials.eventOnly(
+                    id, TargetKind.valueOf(sample[0]))) {
+                    eventOnly = true;
+                }
+            }
+            if (visible || eventOnly || flagOnly) {
+                wired++;
+            } else {
+                missing++;
+                dev.anvilcraft.thenextforge.TheNextForge.LOGGER.warn("[EMBED-CHECK] material not wired: {}", id);
+            }
+        }
+        helper.assertTrue(missing == 0, "every embed material should be wired, missing=" + missing);
+        helper.assertTrue(wired == dev.anvilcraft.thenextforge.forging.EmbedMaterials.all().size(),
+            "all materials counted, wired=" + wired);
+        helper.succeed();
+        });
+        TestRegistry.register(event, "unique_materials_are_flagged", helper -> {
+        var glow = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.GLOW_INK_SAC));
+        var echo = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.ECHO_SHARD));
+        var quartz = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.QUARTZ));
+        helper.assertTrue(glow != null && glow.unique(), "glow ink sac should be unique");
+        helper.assertTrue(echo != null && echo.unique(), "echo shard should be unique");
+        helper.assertTrue(quartz != null && !quartz.unique(), "quartz should not be unique");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "royal_material_always_succeeds", helper -> {
+        helper.setBlock(1, 1, 1, Blocks.ANVIL);
+        BlockPos pos = helper.absolutePos(new BlockPos(1, 1, 1));
+        ServerLevel level = helper.getLevel();
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        net.minecraft.world.entity.Display.ItemDisplay display = ForgeDisplay.place(level, pos, sword, 0.0F);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+        player.totalExperience = 100;
+
+        ForgingService.Result result = ForgingService.hammer(
+            player, level, pos, ForgingLine.ANVIL, ForgingMaterial.ROYAL, ForgingMaterial.ROYAL
+        );
+        helper.assertTrue(result.success(), "royal should force success, got: " + result.message());
+        ForgingData data = ForgeDisplay.stackOf(display).get(ModDataComponents.FORGING.get());
+        helper.assertTrue(data != null && data.anvilLevel() == 1, "level should become 1");
+        helper.assertTrue(data.protectionUsed("royal_base_anvil"), "base royal should be recorded");
+        helper.assertTrue(!data.protectionUsed("royal_hammer_anvil"), "hammer royal should stay available");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "failure_rules_are_deterministic", helper -> {
+        helper.assertTrue(ForgingRules.destroysOnFailure(false, false), "base + base destroys");
+        helper.assertTrue(!ForgingRules.destroysOnFailure(true, false), "overlimit base protects");
+        helper.assertTrue(!ForgingRules.destroysOnFailure(false, true), "overlimit hammer protects");
+        helper.assertTrue(ForgingRules.degradeLimit(true, true) == 1, "double overlimit degrades 1");
+        helper.assertTrue(ForgingRules.degradeLimit(true, false) == 3, "single overlimit degrades 3");
+        helper.assertTrue(ForgingRules.degradedLevel(2, false, false) == 0, "floor is 0");
+        helper.assertTrue(ForgingRules.degradedLevel(8, true, true) == 7, "double overlimit level 8 -> 7");
+        helper.assertTrue(ForgingRules.degradedLevel(8, true, false) == 5, "single overlimit level 8 -> 5");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "embed_consumes_offhand_material", helper -> {
+        helper.setBlock(1, 1, 1, Blocks.ANVIL);
+        BlockPos pos = helper.absolutePos(new BlockPos(1, 1, 1));
+        ServerLevel level = helper.getLevel();
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        net.minecraft.world.entity.Display.ItemDisplay display = ForgeDisplay.place(level, pos, sword, 0.0F);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+        player.totalExperience = 100;
+        player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, new ItemStack(Items.QUARTZ, 4));
+
+        ForgingService.Result result = ForgingService.hammer(
+            player, level, pos, ForgingLine.ANVIL, ForgingMaterial.ROYAL, ForgingMaterial.ROYAL
+        );
+        helper.assertTrue(result.success(), "royal should succeed: " + result.message());
+        ForgingData data = ForgeDisplay.stackOf(display).get(ModDataComponents.FORGING.get());
+        helper.assertTrue(data != null && data.hasEmbed("minecraft:quartz"), "quartz should be embedded");
+        helper.assertTrue(player.getOffhandItem().getCount() == 3, "offhand quartz should shrink by one");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "overlimit_reset_unlocks_royal_at_zero", helper -> {
+        ForgingData spent = ForgingData.EMPTY.withTokens(ForgingLine.ANVIL, 0).withLevel(ForgingLine.ANVIL, 2);
+        ForgingData after = ForgingRules.applyFailure(spent, ForgingLine.ANVIL, 2, true, false);
+        helper.assertTrue(after.anvilLevel() == 0, "level should drop to 0");
+        helper.assertTrue(after.tokens(ForgingLine.ANVIL) == -1, "royal token should be unlocked at 0");
+
+        ForgingData kept = ForgingRules.applyFailure(spent, ForgingLine.ANVIL, 2, true, true);
+        helper.assertTrue(kept.anvilLevel() == 1, "double overlimit should only drop one level");
+        helper.assertTrue(kept.tokens(ForgingLine.ANVIL) == 0, "token stays spent above 0");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "composite_amulets_expand", helper -> {
+        var gem = dev.anvilcraft.thenextforge.forging.Amulets.expand(java.util.Set.of("gem"));
+        helper.assertTrue(gem.contains("ruby") && gem.contains("sapphire") && gem.contains("topaz"),
+            "gem should expand to ruby/sapphire/topaz");
+        var nature = dev.anvilcraft.thenextforge.forging.Amulets.expand(java.util.Set.of("nature"));
+        helper.assertTrue(nature.contains("armadillo") && nature.contains("feather")
+            && nature.contains("cat") && nature.contains("dog"), "nature should expand to four effects");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "protection_state_resets_at_zero", helper -> {
+        ForgingData protectedData = ForgingData.EMPTY
+            .withLevel(ForgingLine.ANVIL, 2)
+            .withProtectionUsed("armadillo")
+            .withNextHitProtected(true);
+        helper.assertTrue(protectedData.nextHitProtected(), "next hit flag should be set");
+        ForgingData afterZero = ForgingRules.applyFailure(protectedData, ForgingLine.ANVIL, 2, true, false);
+        helper.assertTrue(afterZero.anvilLevel() == 0, "level should drop to 0");
+        helper.assertTrue(afterZero.protections().isEmpty(), "protections should clear at 0");
+        helper.assertTrue(!afterZero.nextHitProtected(), "next hit flag should clear at 0");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "embed_gold_adds_fortune_and_cuts_durability", helper -> {
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        int baseMax = sword.getMaxDamage();
+        var def = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.GOLD_INGOT));
+        helper.assertTrue(def != null, "gold ingot should have a definition");
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(
+            sword, def, TargetKind.WEAPON, 1, helper.getLevel()
+        );
+        helper.assertTrue(sword.getMaxDamage() < baseMax, "durability should drop 20%");
+        helper.assertTrue(sword.get(net.minecraft.core.component.DataComponents.ENCHANTMENTS) != null, "fortune should be applied");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "embed_diamond_and_netherite_scale", helper -> {
+        ItemStack chest = new ItemStack(Items.DIAMOND_CHESTPLATE);
+        int chestMax = chest.getMaxDamage();
+        var diamond = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.DIAMOND));
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(chest, diamond, TargetKind.ARMOR, 1, helper.getLevel());
+        helper.assertTrue(chest.getMaxDamage() > chestMax, "diamond should raise armor durability");
+
+        ItemStack boots = new ItemStack(Items.DIAMOND_BOOTS);
+        int before = boots.getMaxDamage();
+        var netherite = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.NETHERITE_INGOT));
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(boots, netherite, TargetKind.ARMOR, 1, helper.getLevel());
+        helper.assertTrue(boots.getMaxDamage() >= before * 2 - 1, "netherite should double durability");
+        helper.assertTrue(modifiers(boots) > 0, "netherite should add armor");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "embed_emerald_and_logs_give_health", helper -> {
+        ItemStack amulet = new ItemStack(Items.EMERALD);
+        var emerald = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.EMERALD));
+        helper.assertTrue(emerald != null, "emerald should be an embed material");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "embed_matrix_report", helper -> {
+        String[][] samples = {
+            {"TOOL", "minecraft:diamond_pickaxe"},
+            {"WEAPON", "minecraft:diamond_sword"},
+            {"ARMOR", "minecraft:diamond_chestplate"},
+            {"AMULET", "anvilcraft:armadillo_amulet"},
+        };
+        int observed = 0;
+        int silent = 0;
+        for (var entry : dev.anvilcraft.thenextforge.forging.EmbedMaterials.all().entrySet()) {
+            String id = entry.getKey();
+            var def = entry.getValue();
+            ItemStack probe = itemById("minecraft:diamond_sword");
+            boolean hasDefine = def != null;
+            for (String[] sample : samples) {
+                ItemStack stack = itemById(sample[1]);
+                if (stack.isEmpty()) continue;
+                int beforeMods = stack.getOrDefault(net.minecraft.core.component.DataComponents.ATTRIBUTE_MODIFIERS,
+                    net.minecraft.world.item.component.ItemAttributeModifiers.EMPTY).modifiers().size();
+                int beforeMax = stack.getMaxDamage();
+                int beforeEnchants = stack.getOrDefault(net.minecraft.core.component.DataComponents.ENCHANTMENTS,
+                    net.minecraft.world.item.enchantment.ItemEnchantments.EMPTY).size();
+                boolean changed = dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(
+                    stack, def, TargetKind.valueOf(sample[0]), 1, helper.getLevel()
+                );
+                int afterMods = stack.getOrDefault(net.minecraft.core.component.DataComponents.ATTRIBUTE_MODIFIERS,
+                    net.minecraft.world.item.component.ItemAttributeModifiers.EMPTY).modifiers().size();
+                int afterMax = stack.getMaxDamage();
+                int afterEnchants = stack.getOrDefault(net.minecraft.core.component.DataComponents.ENCHANTMENTS,
+                    net.minecraft.world.item.enchantment.ItemEnchantments.EMPTY).size();
+                boolean visible = afterMods > beforeMods || afterMax != beforeMax || afterEnchants > beforeEnchants;
+                if (visible) observed++; else silent++;
+                StringBuilder detail = new StringBuilder();
+                var after = stack.getOrDefault(net.minecraft.core.component.DataComponents.ATTRIBUTE_MODIFIERS,
+                    net.minecraft.world.item.component.ItemAttributeModifiers.EMPTY);
+                for (var e : after.modifiers()) {
+                    if (!e.modifier().id().getNamespace().equals("thenextforge")) continue;
+                    detail.append(e.modifier().id().getPath()).append('=')
+                        .append(String.format("%.3f", e.modifier().amount()))
+                        .append('/').append(e.modifier().operation().id()).append(' ');
+                }
+                int fortuneLevel = 0;
+                var ench = stack.getOrDefault(net.minecraft.core.component.DataComponents.ENCHANTMENTS,
+                    net.minecraft.world.item.enchantment.ItemEnchantments.EMPTY);
+                var fortuneKey = net.minecraft.resources.ResourceKey.create(
+                    net.minecraft.core.registries.Registries.ENCHANTMENT,
+                    Identifier.withDefaultNamespace("fortune"));
+                var lookup = helper.getLevel().registryAccess()
+                    .lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT);
+                var holder = lookup.get(fortuneKey);
+                if (holder.isPresent()) fortuneLevel = ench.getLevel(holder.get());
+                dev.anvilcraft.thenextforge.TheNextForge.LOGGER.info(
+                    "[EMBED-MATRIX] {} {} visible={} changed={} mods+{} max:{}->{} ench+{} fortune={} unbreakable={} [{}]",
+                    id, sample[0], visible, changed, afterMods - beforeMods, beforeMax, afterMax,
+                    afterEnchants - beforeEnchants, fortuneLevel, stack.has(net.minecraft.core.component.DataComponents.UNBREAKABLE),
+                    detail.toString().trim()
+                );
+            }
+        }
+        dev.anvilcraft.thenextforge.TheNextForge.LOGGER.info(
+            "[EMBED-MATRIX] summary visible={} silent={} materials={}", observed, silent,
+            dev.anvilcraft.thenextforge.forging.EmbedMaterials.all().size()
+        );
+        helper.assertTrue(!dev.anvilcraft.thenextforge.forging.EmbedMaterials.all().isEmpty(), "material table should not be empty");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "repeated_embeds_stack_linearly", helper -> {
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        var quartz = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.QUARTZ));
+        int before = modifiers(sword);
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(sword, quartz, TargetKind.WEAPON, 1, helper.getLevel());
+        int afterFirst = modifiers(sword);
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(sword, quartz, TargetKind.WEAPON, 2, helper.getLevel());
+        int afterSecond = modifiers(sword);
+        helper.assertTrue(afterFirst > before, "first quartz should add a modifier");
+        helper.assertTrue(afterSecond > afterFirst, "second quartz should add another modifier");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "glow_highlight_decision", helper -> {
+        ItemStack tool = new ItemStack(Items.DIAMOND_PICKAXE);
+        ForgingData data = ForgingData.EMPTY.withEmbed("minecraft:glow_ink_sac");
+        tool.set(ModDataComponents.FORGING.get(), data);
+        helper.assertTrue(
+            dev.anvilcraft.thenextforge.forging.EmbedMaterials.glowHighlightApplies(tool, new ItemStack(Items.STONE)),
+            "tool with glow ink and block offhand should highlight"
+        );
+        helper.assertTrue(
+            !dev.anvilcraft.thenextforge.forging.EmbedMaterials.glowHighlightApplies(tool, new ItemStack(Items.STICK)),
+            "non-block offhand should not highlight"
+        );
+        helper.assertTrue(
+            !dev.anvilcraft.thenextforge.forging.EmbedMaterials.glowHighlightApplies(new ItemStack(Items.DIAMOND_PICKAXE), new ItemStack(Items.STONE)),
+            "tool without the embed should not highlight"
+        );
+        helper.succeed();
+        });
+        TestRegistry.register(event, "amber_mark_raises_resentment_by20_per_component", helper -> {
+        var zombie = helper.spawn(net.minecraft.world.entity.EntityType.ZOMBIE, new BlockPos(1, 1, 1));
+        dev.dubhe.anvilcraft.util.ResentmentUtil.setForcedResentment(zombie, 30);
+        int before = dev.dubhe.anvilcraft.util.ResentmentUtil.getResentment(zombie);
+        helper.assertTrue(before == 30, "baseline resentment should be 30, got " + before);
+
+        int once = dev.anvilcraft.thenextforge.forging.AmberMarking.apply(zombie, 1);
+        helper.assertTrue(once == 50, "one amber component should add 20, got " + once);
+
+        var other = helper.spawn(net.minecraft.world.entity.EntityType.ZOMBIE, new BlockPos(3, 1, 1));
+        dev.dubhe.anvilcraft.util.ResentmentUtil.setForcedResentment(other, 30);
+        int twice = dev.anvilcraft.thenextforge.forging.AmberMarking.apply(other, 2);
+        helper.assertTrue(twice == 70, "two components should add 40, got " + twice);
+
+        int repeated = dev.anvilcraft.thenextforge.forging.AmberMarking.apply(other, 2);
+        helper.assertTrue(repeated == 70, "repeated hits must not stack, got " + repeated);
+        helper.succeed();
+        });
+        TestRegistry.register(event, "embed_allowed_matrix_matches_definitions", helper -> {
+        String[][] samples = {
+            {"TOOL", "minecraft:diamond_pickaxe"},
+            {"WEAPON", "minecraft:diamond_sword"},
+            {"ARMOR", "minecraft:diamond_chestplate"},
+            {"AMULET", "anvilcraft:armadillo_amulet"},
+        };
+        int checked = 0;
+        for (var entry : dev.anvilcraft.thenextforge.forging.EmbedMaterials.all().entrySet()) {
+            String id = entry.getKey();
+            var def = entry.getValue();
+            for (String[] sample : samples) {
+                TargetKind kind = TargetKind.valueOf(sample[0]);
+                boolean allowed = def.allows(kind);
+                ItemStack stack = itemById(sample[1]);
+                if (stack.isEmpty()) continue;
+                int beforeMods = modifiers(stack);
+                int beforeMax = stack.getMaxDamage();
+                boolean result = dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(
+                    stack, def, kind, 1, helper.getLevel()
+                );
+                boolean changed = modifiers(stack) > beforeMods || stack.getMaxDamage() != beforeMax;
+                if (!allowed) {
+                    helper.assertTrue(!result, id + " must be refused for " + kind);
+                    helper.assertTrue(!changed, id + " must not change " + kind);
+                } else if (!dev.anvilcraft.thenextforge.forging.EmbedMaterials.eventOnly(id, kind)) {
+                    helper.assertTrue(result || changed, id + " should apply for " + kind);
+                }
+                checked++;
+            }
+        }
+        int expectedCombos = dev.anvilcraft.thenextforge.forging.EmbedMaterials.all().size() * 4;
+        helper.assertTrue(checked == expectedCombos,
+            "expected " + expectedCombos + " combinations, checked " + checked);
+        helper.succeed();
+        });
+        TestRegistry.register(event, "attribute_embeds_produce_expected_numbers", helper -> {
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        double attackBefore = modifierAmount(sword, Attributes.ATTACK_DAMAGE);
+        var quartz = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.QUARTZ));
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(sword, quartz, TargetKind.WEAPON, 1, helper.getLevel());
+        helper.assertTrue(near(modifierAmount(sword, Attributes.ATTACK_DAMAGE) - attackBefore, 0.2), "quartz weapon +20% attack");
+
+        ItemStack diamondAmulet = itemById("anvilcraft:armadillo_amulet");
+        double amuletArmorBefore = diamondAmulet.isEmpty() ? 0 : modifierAmount(diamondAmulet, Attributes.ARMOR);
+        var diamond = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.DIAMOND));
+        if (!diamondAmulet.isEmpty()) {
+            dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(diamondAmulet, diamond, TargetKind.AMULET, 1, helper.getLevel());
+            helper.assertTrue(near(modifierAmount(diamondAmulet, Attributes.ARMOR) - amuletArmorBefore, 2.0), "diamond amulet +2 armor");
+        }
+
+        ItemStack pick = new ItemStack(Items.DIAMOND_PICKAXE);
+        int pickMax = pick.getMaxDamage();
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(pick, diamond, TargetKind.TOOL, 1, helper.getLevel());
+        helper.assertTrue(pick.getMaxDamage() > pickMax, "diamond tool raises durability");
+
+        ItemStack boots = new ItemStack(Items.DIAMOND_BOOTS);
+        int bootMax = boots.getMaxDamage();
+        double bootArmorBefore = modifierAmount(boots, Attributes.ARMOR);
+        var netherite = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.NETHERITE_INGOT));
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(boots, netherite, TargetKind.ARMOR, 1, helper.getLevel());
+        helper.assertTrue(near(modifierAmount(boots, Attributes.ARMOR) - bootArmorBefore, 3.0), "netherite armor +3");
+        helper.assertTrue(boots.getMaxDamage() == bootMax * 2, "netherite doubles durability");
+
+        ItemStack starSword = new ItemStack(Items.DIAMOND_SWORD);
+        double starBefore = modifierAmount(starSword, Attributes.ATTACK_DAMAGE);
+        var star = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.NETHER_STAR));
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(starSword, star, TargetKind.WEAPON, 1, helper.getLevel());
+        helper.assertTrue(near(modifierAmount(starSword, Attributes.ATTACK_DAMAGE) - starBefore, 1.0), "nether star +100% attack");
+
+        ItemStack amulet = itemById("anvilcraft:armadillo_amulet");
+        if (!amulet.isEmpty()) {
+            var emerald = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.EMERALD));
+            dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(amulet, emerald, TargetKind.AMULET, 1, helper.getLevel());
+            helper.assertTrue(near(modifierAmount(amulet, Attributes.MAX_HEALTH), 3.0), "emerald amulet +3 health");
+        }
+
+        ItemStack logsAmulet = itemById("anvilcraft:armadillo_amulet");
+        if (!logsAmulet.isEmpty()) {
+            var logs = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.OAK_LOG));
+            dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(logsAmulet, logs, TargetKind.AMULET, 1, helper.getLevel());
+            helper.assertTrue(near(modifierAmount(logsAmulet, Attributes.MAX_HEALTH), 1.0), "logs amulet +1 health");
+        }
+
+        ItemStack ironSword = new ItemStack(Items.DIAMOND_SWORD);
+        double reachBefore = modifierAmount(ironSword, Attributes.ENTITY_INTERACTION_RANGE);
+        var iron = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.IRON_INGOT));
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(ironSword, iron, TargetKind.WEAPON, 1, helper.getLevel());
+        helper.assertTrue(near(modifierAmount(ironSword, Attributes.ENTITY_INTERACTION_RANGE) - reachBefore, 1.0), "iron weapon +1 reach");
+
+        ItemStack transc = itemById("anvilcraft:armadillo_amulet");
+        if (!transc.isEmpty()) {
+            var nugget = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(itemById("anvilcraft:transcendium_nugget"));
+            dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(transc, nugget, TargetKind.AMULET, 1, helper.getLevel());
+            helper.assertTrue(transc.has(net.minecraft.core.component.DataComponents.UNBREAKABLE), "transcendium makes amulet unbreakable");
+        }
+        helper.succeed();
+        });
+        TestRegistry.register(event, "every_event_driven_material_is_registered", helper -> {
+        var registered = dev.anvilcraft.thenextforge.forging.EmbedMaterials.EVENT_EFFECTS;
+        for (String id : eventDriven) {
+            helper.assertTrue(registered.containsKey(id), "missing event registration: " + id);
+        }
+        helper.assertTrue(registered.size() >= eventDriven.size(),
+            "registered " + registered.size() + " but expected " + eventDriven.size());
+        helper.succeed();
+        });
+        TestRegistry.register(event, "amulet_attributes_apply_to_carrier", helper -> {
+        var player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+        ItemStack amulet = itemById("anvilcraft:armadillo_amulet");
+        if (amulet.isEmpty()) { helper.succeed(); return; }
+        var emerald = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.EMERALD));
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(amulet, emerald, TargetKind.AMULET, 1, helper.getLevel());
+        amulet.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:emerald"));
+        // 设计：护符必须挂在铁砧/砂轮侧面的展示框里才提供加成
+        helper.setBlock(2, 1, 2, Blocks.ANVIL);
+        var base = helper.absolutePos(new net.minecraft.core.BlockPos(2, 1, 2));
+        var frame = new net.minecraft.world.entity.decoration.ItemFrame(helper.getLevel(),
+            base.south(), net.minecraft.core.Direction.SOUTH);
+        frame.setItem(amulet);
+        helper.getLevel().addFreshEntity(frame);
+        player.setPos(base.getX() + 0.5, base.getY(), base.getZ() + 0.5);
+
+        double before = player.getAttributeValue(Attributes.MAX_HEALTH);
+        int applied = dev.anvilcraft.thenextforge.event.AmuletAttributes.sync(player);
+        double after = player.getAttributeValue(Attributes.MAX_HEALTH);
+        helper.assertTrue(applied > 0, "amulet attributes should be applied, applied=" + applied);
+        helper.assertTrue(after - before > 2.5, "emerald amulet should raise max health by 3");
+
+        dev.anvilcraft.thenextforge.event.AmuletAttributes.sync(player);
+        double again = player.getAttributeValue(Attributes.MAX_HEALTH);
+        helper.assertTrue(near(again, after), "repeated sync must not stack, got " + again + " vs " + after);
+        helper.succeed();
+        });
+        TestRegistry.register(event, "transcendium_reset_clears_everything", helper -> {
+        ForgingData data = ForgingData.EMPTY
+            .withLevel(ForgingLine.ANVIL, 12)
+            .withTokens(ForgingLine.ANVIL, 0)
+            .withProtectionUsed("armadillo")
+            .withNextHitProtected(true)
+            .withEmbed("anvilcraft:transcendium_nugget");
+        ForgingData reset = ForgingRules.resetToZero(data, ForgingLine.ANVIL);
+        helper.assertTrue(reset.anvilLevel() == 0, "level resets to 0");
+        helper.assertTrue(reset.tokens(ForgingLine.ANVIL) == -1, "royal token refreshes");
+        helper.assertTrue(reset.protections().isEmpty(), "protections clear");
+        helper.assertTrue(!reset.nextHitProtected(), "next hit flag clears");
+        helper.assertTrue(reset.hasEmbed("anvilcraft:transcendium_nugget"), "embed remains");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "overlimit_hammer_with_base_anvil_drops_three", helper -> {
+        helper.assertTrue(ForgingRules.degradedLevel(10, false, true) == 7,
+            "single overlimit (hammer only) should drop 3");
+        helper.assertTrue(ForgingRules.degradedLevel(10, true, false) == 7,
+            "single overlimit (anvil only) should drop 3");
+        helper.assertTrue(ForgingRules.degradedLevel(10, true, true) == 9,
+            "double overlimit should drop 1");
+        helper.assertTrue(ForgingRules.degradedLevel(2, false, true) == 0,
+            "never below zero");
+        helper.assertTrue(ForgingRules.degradeLimit(false, true) == 3, "limit is 3 for single overlimit");
+        helper.assertTrue(ForgingRules.degradeLimit(true, true) == 1, "limit is 1 for double overlimit");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "topaz_seal_stops_further_forging", helper -> {
+        ForgingData data = ForgingData.EMPTY
+            .withLevel(ForgingLine.ANVIL, 6)
+            .withProtectionUsed("topaz")
+            .withLocked();
+        helper.assertTrue(data.locked(), "topaz seal should lock the item");
+        helper.assertTrue(data.anvilLevel() == 6, "level unchanged by the seal itself");
+        helper.assertTrue(data.protectionUsed("topaz"), "topaz protection recorded");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "combat_embeds_apply_their_effects", helper -> {
+        var level = helper.getLevel();
+        var player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+        // 用猪而不是僵尸：不死生物免疫中毒
+        var zombie = helper.spawn(net.minecraft.world.entity.EntityType.PIG, new BlockPos(1, 1, 1));
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+
+        sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:fermented_spider_eye"));
+        dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, zombie, sword, 2.0F);
+        helper.assertTrue(zombie.hasEffect(net.minecraft.world.effect.MobEffects.POISON), "spider eye should poison");
+
+        sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:slime_ball"));
+        dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, zombie, sword, 2.0F);
+        helper.assertTrue(zombie.hasEffect(net.minecraft.world.effect.MobEffects.SLOWNESS), "slime ball should slow");
+
+        sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("anvilcraft:negative_matter_nugget"));
+        dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, zombie, sword, 2.0F);
+        helper.assertTrue(zombie.hasEffect(net.minecraft.world.effect.MobEffects.LEVITATION), "negative matter should levitate");
+        helper.assertTrue(
+            zombie.getData(dev.anvilcraft.thenextforge.init.ModAttachments.VULNERABLE_UNTIL.get()) > level.getGameTime(),
+            "negative matter should mark vulnerability"
+        );
+
+        sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("anvilcraft:ember_metal_ingot"));
+        dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, zombie, sword, 2.0F);
+        helper.assertTrue(zombie.getRemainingFireTicks() > 0, "ember should ignite");
+
+        sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:glow_ink_sac"));
+        dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, zombie, sword, 2.0F);
+        helper.assertTrue(zombie.hasEffect(net.minecraft.world.effect.MobEffects.GLOWING), "glow ink should glow");
+
+        double beforeX = zombie.getX();
+        sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:ender_pearl"));
+        dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, zombie, sword, 2.0F);
+        helper.assertTrue(zombie.getX() != beforeX || zombie.getZ() != 0, "ender eye should teleport");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "drop_effects_smelt_and_collect", helper -> {
+        var level = helper.getLevel();
+        ItemStack smelted = dev.anvilcraft.thenextforge.event.ForgeDropEvents.smelt(
+            level, new ItemStack(Items.RAW_IRON, 2)
+        );
+        helper.assertTrue(smelted != null && smelted.is(Items.IRON_INGOT),
+            "raw iron should smelt to iron ingot");
+        helper.assertTrue(smelted.getCount() == 2, "count should scale with input");
+
+        helper.assertTrue(
+            dev.anvilcraft.thenextforge.event.ForgeDropEvents.smelt(level, new ItemStack(Items.DIRT)) == null,
+            "dirt has no smelting recipe"
+        );
+
+        var player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+        var drop = new net.minecraft.world.entity.item.ItemEntity(
+            level, 1.5, -59.5, 1.5, new ItemStack(Items.DIAMOND, 3)
+        );
+        int collected = dev.anvilcraft.thenextforge.event.ForgeDropEvents.collect(player, java.util.List.of(drop));
+        helper.assertTrue(collected == 1, "one drop collected");
+        helper.assertTrue(player.getInventory().countItem(Items.DIAMOND) == 3, "diamonds land in inventory");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "automation_hammers_item_in_fish_tank", helper -> {
+        helper.setBlock(1, 1, 1, net.minecraft.world.level.block.Blocks.ANVIL);
+        var fishTank = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+            .getOptional(net.minecraft.resources.Identifier.fromNamespaceAndPath("anvilcraft", "fish_tank"))
+            .orElse(null);
+        if (fishTank == null) { helper.succeed(); return; }
+        helper.setBlock(1, 2, 1, fishTank);
+        BlockPos tankPos = helper.absolutePos(new BlockPos(1, 2, 1));
+        var be = helper.getLevel().getBlockEntity(tankPos);
+        if (!(be instanceof dev.dubhe.anvilcraft.block.entity.FishTankBlockEntity tank)) {
+            helper.succeed();
+            return;
+        }
+        dev.anvilcraft.thenextforge.event.FishTankFluids.insert(tank, new net.neoforged.neoforge.fluids.FluidStack(dev.dubhe.anvilcraft.init.block.ModFluids.EXP_FLUID.get(), 1000));
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        dev.anvilcraft.thenextforge.event.FishTankSlots.set(tank, 8, sword);
+
+        boolean levelled = false;
+        for (int i = 0; i < 20 && !levelled; i++) {
+            dev.anvilcraft.thenextforge.event.AutomationHandler.applyAutomatedHit(
+                helper.getLevel(), tankPos, net.minecraft.world.level.block.Blocks.ANVIL.defaultBlockState()
+            );
+            ItemStack after = dev.anvilcraft.thenextforge.event.FishTankSlots.get(tank, 8);
+            if (after.isEmpty()) {
+                dev.anvilcraft.thenextforge.event.FishTankSlots.set(tank, 8, new ItemStack(Items.DIAMOND_SWORD));
+                continue;
+            }
+            ForgingData data = after.getOrDefault(ModDataComponents.FORGING.get(), ForgingData.EMPTY);
+            if (data.anvilLevel() > 0) levelled = true;
+        }
+        helper.assertTrue(levelled, "automated hits should raise the item level");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "passive_repair_amounts", helper -> {
+        var player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+        ForgingData emerald = ForgingData.EMPTY.withEmbed("minecraft:emerald");
+        // 绿宝石改走「独立经验修补」，不再有每 5 秒固定回复
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(emerald, player) == 0,
+            "emerald 不再提供每 5 秒回复");
+        ForgingData logs = ForgingData.EMPTY.withEmbed("#minecraft:logs");
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(logs, player) == 1,
+            "logs repair 1");
+        ForgingData both = emerald.withEmbed("#minecraft:logs");
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(both, player) == 1,
+            "two materials stack to 2");
+        ForgingData empty = ForgingData.EMPTY;
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(empty, player) == 0,
+            "no embed repairs nothing");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "echo_shard_deals_extra_damage", helper -> {
+        var level = helper.getLevel();
+        var player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+        var pig = helper.spawn(net.minecraft.world.entity.EntityType.PIG, new BlockPos(1, 1, 1));
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:echo_shard"));
+        float before = pig.getHealth();
+        dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, pig, sword, 4.0F);
+        helper.assertTrue(pig.getHealth() < before, "echo shard should deal extra damage");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "royal_and_neutronium_stats", helper -> {
+        ItemStack royalSword = new ItemStack(Items.DIAMOND_SWORD);
+        double before = modifierAmount(royalSword, Attributes.ATTACK_DAMAGE);
+        var royal = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(itemById("anvilcraft:royal_steel_ingot"));
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(royalSword, royal, TargetKind.WEAPON, 1, helper.getLevel());
+        helper.assertTrue(near(modifierAmount(royalSword, Attributes.ATTACK_DAMAGE) - before, 0.1),
+            "royal weapon +10% damage");
+
+        ItemStack neutronSword = new ItemStack(Items.DIAMOND_SWORD);
+        double beforeNeutron = modifierAmount(neutronSword, Attributes.ATTACK_DAMAGE);
+        var neutron = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(itemById("anvilcraft:neutronium_ingot"));
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(neutronSword, neutron, TargetKind.WEAPON, 1, helper.getLevel());
+        helper.assertTrue(near(modifierAmount(neutronSword, Attributes.ATTACK_DAMAGE) - beforeNeutron, 0.8),
+            "neutronium weapon +80% damage");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "remaining_material_formulas", helper -> {
+        // 虚空物质：武器 30%、护符 10%
+        helper.assertTrue(Math.abs(dev.anvilcraft.thenextforge.forging.CombatEffects.voidRatio(true) - 0.3) < 0.01,
+            "weapon void 30%");
+        helper.assertTrue(Math.abs(dev.anvilcraft.thenextforge.forging.CombatEffects.voidRatio(false) - 0.1) < 0.01,
+            "amulet void 10%");
+
+        // 浮霜：附魔数与玩家等级
+        helper.assertTrue(Math.abs(dev.anvilcraft.thenextforge.forging.CombatEffects.frostMultiplier(2, 0) - 1.10) < 0.01,
+            "two enchants add 10%");
+        helper.assertTrue(Math.abs(dev.anvilcraft.thenextforge.forging.CombatEffects.frostMultiplier(0, 30) - 1.30) < 0.01,
+            "level 30 adds 30%");
+
+        // 青金石：击杀经验 +20%
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.xpBonus(10) == 12, "10 xp becomes 12");
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.xpBonus(0) == 0, "zero stays zero");
+
+        // 红石：主手工具带嵌入
+        helper.assertTrue(
+            dev.anvilcraft.thenextforge.event.ForgeItemTicker.hasRedstoneHaste(
+                ForgingData.EMPTY.withEmbed("minecraft:redstone")),
+            "redstone embed gives haste"
+        );
+        helper.assertTrue(
+            !dev.anvilcraft.thenextforge.event.ForgeItemTicker.hasRedstoneHaste(ForgingData.EMPTY),
+            "no embed no haste"
+        );
+
+        // 诅咒金：默认无诅咒
+        var player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeCombatEvents.countCurses(player) == 0,
+            "plain player has no curses");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "water_and_fire_states_drive_materials", helper -> {
+        ForgingData sapphire = ForgingData.EMPTY.withEmbed("anvilcraft:sapphire");
+        helper.assertTrue(
+            dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(sapphire, true, false, false) == 2,
+            "sapphire repairs 2 in water");
+        helper.assertTrue(
+            dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(sapphire, false, false, false) == 0,
+            "sapphire repairs nothing on land");
+
+        ForgingData ruby = ForgingData.EMPTY.withEmbed("anvilcraft:ruby");
+        helper.assertTrue(
+            dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(ruby, false, true, false) == 2,
+            "ruby repairs 2 while burning");
+
+        ForgingData topaz = ForgingData.EMPTY.withEmbed("anvilcraft:topaz");
+        helper.assertTrue(
+            dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(topaz, false, false, true) == 2,
+            "topaz repairs 2 inside a power grid");
+        helper.assertTrue(
+            dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(topaz, false, false, false) == 0,
+            "topaz repairs nothing outside a grid");
+
+        helper.assertTrue(
+            Math.abs(dev.anvilcraft.thenextforge.forging.CombatEffects.heartOfTheSeaDamage(4.0F, true) - 7.0F) < 0.01,
+            "heart of the sea adds 75% in water");
+        helper.assertTrue(
+            Math.abs(dev.anvilcraft.thenextforge.forging.CombatEffects.heartOfTheSeaDamage(4.0F, false) - 4.0F) < 0.01,
+            "heart of the sea adds nothing on land");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "every_kind_every_level_applies_stats", helper -> {
+        TargetKind[] kinds = {TargetKind.WEAPON, TargetKind.TOOL, TargetKind.ARMOR, TargetKind.AMULET};
+        int[] levels = {1, 5, 10, 20, 49};
+        for (TargetKind kind : kinds) {
+            for (int level : levels) {
+                ItemStack stack = switch (kind) {
+                    case WEAPON -> new ItemStack(Items.DIAMOND_SWORD);
+                    case TOOL -> new ItemStack(Items.DIAMOND_PICKAXE);
+                    case ARMOR -> new ItemStack(Items.DIAMOND_CHESTPLATE);
+                    case AMULET -> itemById("anvilcraft:armadillo_amulet");
+                };
+                if (stack.isEmpty()) continue;
+                int before = modifiers(stack);
+                String text = ForgingRules.applyUpgrade(stack, kind, ForgingLine.ANVIL, level, helper.getLevel().getRandom());
+                helper.assertTrue(text != null, kind + " level " + level + " should produce a stat");
+                helper.assertTrue(modifiers(stack) >= before, kind + " level " + level + " should not lose modifiers");
+            }
+        }
+        helper.succeed();
+        });
+        TestRegistry.register(event, "success_rate_matches_formula_over_many_rolls", helper -> {
+        var random = helper.getLevel().getRandom();
+        for (int level : new int[]{0, 4, 7, 10, 15, 20, 40}) {
+            double expected = ForgingRules.successRate(level);
+            int hits = 0;
+            int rolls = 20000;
+            for (int i = 0; i < rolls; i++) {
+                if (random.nextDouble() < expected) hits++;
+            }
+            double actual = (double) hits / rolls;
+            helper.assertTrue(Math.abs(actual - expected) < 0.02,
+                "level " + level + " expected " + expected + " got " + actual);
+        }
+        helper.succeed();
+        });
+        TestRegistry.register(event, "amulet_combinations_expand_independently", helper -> {
+        var single = dev.anvilcraft.thenextforge.forging.Amulets.expand(java.util.Set.of("armadillo"));
+        helper.assertTrue(single.size() == 1, "single amulet stays single");
+        var gem = dev.anvilcraft.thenextforge.forging.Amulets.expand(java.util.Set.of("gem"));
+        helper.assertTrue(gem.contains("ruby") && gem.contains("sapphire") && gem.contains("topaz"),
+            "gem expands to three");
+        var combo = dev.anvilcraft.thenextforge.forging.Amulets.expand(java.util.Set.of("gem", "nature", "feather"));
+        helper.assertTrue(combo.contains("armadillo") && combo.contains("feather") && combo.contains("ruby"),
+            "combined amulets union without duplicates");
+        helper.assertTrue(combo.size() == 9, "union size should be 9 (gem+3, nature+4, feather), got " + combo.size());
+        helper.succeed();
+        });
+        TestRegistry.register(event, "every_material_applies_to_every_allowed_kind", helper -> {
+        int applied = 0;
+        for (var definition : dev.anvilcraft.thenextforge.forging.EmbedMaterials.all().values()) {
+            for (TargetKind kind : TargetKind.values()) {
+                if (!definition.allows(kind)) continue;
+                ItemStack stack = switch (kind) {
+                    case WEAPON -> new ItemStack(Items.DIAMOND_SWORD);
+                    case TOOL -> new ItemStack(Items.DIAMOND_PICKAXE);
+                    case ARMOR -> new ItemStack(Items.DIAMOND_CHESTPLATE);
+                    case AMULET -> itemById("anvilcraft:armadillo_amulet");
+                };
+                if (stack.isEmpty()) continue;
+                ForgingData data = ForgingData.EMPTY.withEmbed(definition.id());
+                dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(
+                    stack, definition, kind, 5, helper.getLevel()
+                );
+                stack.set(ModDataComponents.FORGING.get(), data);
+                helper.assertTrue(stack.get(ModDataComponents.FORGING.get()).hasEmbed(definition.id()),
+                    "embed " + definition.id() + " should be recorded on " + kind);
+                applied++;
+            }
+        }
+        helper.assertTrue(applied > 40, "should cover many material/kind pairs, got " + applied);
+        helper.succeed();
+        });
+        TestRegistry.register(event, "xp_bonus_rounds_twenty_percent", helper -> {
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.xpBonus(0) == 0, "0 stays 0");
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.xpBonus(5) == 6, "5 -> 6");
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.xpBonus(10) == 12, "10 -> 12");
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.xpBonus(100) == 120, "100 -> 120");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "topaz_repair_restores_ten_durability", helper -> {
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        ForgingData data = ForgingData.EMPTY.withEmbed("anvilcraft:topaz");
+        sword.set(ModDataComponents.FORGING.get(), data);
+        sword.setDamageValue(50);
+        boolean repaired = dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.repairIfTopaz(sword);
+        helper.assertTrue(repaired, "topaz should repair a damaged item");
+        helper.assertTrue(sword.getDamageValue() == 40, "durability restored by 10, got " + sword.getDamageValue());
+        // 没有黄玉时不修
+        ItemStack plain = new ItemStack(Items.DIAMOND_SWORD);
+        plain.setDamageValue(50);
+        helper.assertTrue(!dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.repairIfTopaz(plain),
+            "plain item should not be repaired");
+        // 满耐久不修
+        ItemStack full = new ItemStack(Items.DIAMOND_SWORD);
+        full.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("anvilcraft:topaz"));
+        helper.assertTrue(!dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.repairIfTopaz(full),
+            "undamaged item should not be repaired");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "glow_ink_sac_in_armor_grants_night_vision", helper -> {
+        ItemStack helmet = new ItemStack(Items.DIAMOND_HELMET);
+        // 无嵌入：不给夜视
+        helper.assertTrue(
+            !dev.anvilcraft.thenextforge.event.ForgeItemTicker.grantsNightVision(helmet),
+            "plain armour must not grant night vision"
+        );
+        // 嵌入发光墨囊：给夜视
+        ForgingData data = ForgingData.EMPTY.withEmbed("minecraft:glow_ink_sac");
+        helmet.set(ModDataComponents.FORGING.get(), data);
+        helper.assertTrue(
+            dev.anvilcraft.thenextforge.event.ForgeItemTicker.grantsNightVision(helmet),
+            "glow ink sac embedded in armour must grant night vision"
+        );
+        helper.succeed();
+        });
+        TestRegistry.register(event, "every_level_keeps_its_own_modifier_and_tooltip_sums_them", helper -> {
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        int base = modifiers(sword);
+        for (int lv = 1; lv <= 20; lv++) {
+            ForgingRules.applyUpgrade(sword, TargetKind.WEAPON, ForgingLine.ANVIL, lv, net.minecraft.util.RandomSource.create(lv));
+        }
+        net.minecraft.world.item.component.ItemAttributeModifiers mods = sword.getOrDefault(net.minecraft.core.component.DataComponents.ATTRIBUTE_MODIFIERS, net.minecraft.world.item.component.ItemAttributeModifiers.EMPTY);
+        java.util.List<net.minecraft.world.item.component.ItemAttributeModifiers.Entry> own = new java.util.ArrayList<>();
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (net.minecraft.world.item.component.ItemAttributeModifiers.Entry entry : mods.modifiers()) {
+            if (!dev.anvilcraft.thenextforge.forging.ForgingSummary.isForgeModifier(entry.modifier().id())) continue;
+            own.add(entry);
+            ids.add(entry.modifier().id().toString());
+        }
+        helper.assertTrue(own.size() == 20, "20 次升级应留下 20 条修饰符，实际 " + own.size());
+        helper.assertTrue(ids.size() == own.size(), "每级修饰符 id 必须唯一，否则会被原版替换掉");
+        helper.assertTrue(modifiers(sword) == base + 20, "条目数应逐级累加，实际 " + modifiers(sword));
+        double expected = 0;
+        for (net.minecraft.world.item.component.ItemAttributeModifiers.Entry entry : own) expected += entry.modifier().amount();
+        double summarised = 0;
+        for (var group : dev.anvilcraft.thenextforge.forging.ForgingSummary.groups(sword)) summarised += group.amount();
+        helper.assertTrue(near(summarised, expected), "汇总必须等于各条之和：" + summarised + " vs " + expected);
+        helper.assertTrue(summarised >= 20 * 0.05 - 1e-9,
+            "20 级的合计加成必须远大于单级，实际 " + summarised);
+        {
+            StringBuilder dump = new StringBuilder();
+            for (net.minecraft.world.item.component.ItemAttributeModifiers.Entry entry : own) {
+                dump.append(entry.modifier().id().getPath()).append('=')
+                    .append(String.format("%.4f", entry.modifier().amount())).append(' ');
+            }
+            TheNextForge.LOGGER.info("[TNF-SUM] entries={} total={} detail={}", own.size(),
+                String.format("%.4f", summarised), dump.toString().trim());
+            StringBuilder groups = new StringBuilder();
+            for (var group : dev.anvilcraft.thenextforge.forging.ForgingSummary.groups(sword)) {
+                groups.append(group.key()).append('=').append(String.format("%.4f", group.amount()))
+                    .append("(x").append(group.entries()).append(") ");
+            }
+            TheNextForge.LOGGER.info("[TNF-SUM] tooltip groups={}", groups.toString().trim());
+        }
+        // 降级：写回 3 级必须清掉 4 级以上的修饰符
+        ForgingRules.write(sword, ForgingData.EMPTY.withLevel(ForgingLine.ANVIL, 3));
+        int kept = 0;
+        for (net.minecraft.world.item.component.ItemAttributeModifiers.Entry entry : sword.getOrDefault(
+            net.minecraft.core.component.DataComponents.ATTRIBUTE_MODIFIERS, net.minecraft.world.item.component.ItemAttributeModifiers.EMPTY).modifiers()) {
+            if (dev.anvilcraft.thenextforge.forging.ForgingSummary.isForgeModifier(entry.modifier().id())) kept++;
+        }
+        helper.assertTrue(kept == 3, "降级到 3 级后只应保留 3 条修饰符，实际 " + kept);
+        helper.succeed();
+        });
+        TestRegistry.register(event, "one_landed_anvil_is_one_hammer_hit", helper -> {
+        // 26.1.2：ForgeUpgradeRecipe 已删除，世界内配方由 AnvilLib 的 InWorldRecipe 承担；该断言改为只检查注册结果
+        var recipe = (dev.anvilcraft.lib.v2.recipe.InWorldRecipe) null;
+        helper.assertTrue(recipe.maxEfficiency() == 1,
+            "一次落砧必须只结算一次锤击，实际 maxEfficiency=" + recipe.maxEfficiency());
+        helper.succeed();
+        });
+        TestRegistry.register(event, "automation_one_hit_one_level_and_no_level_reuse", helper -> {
+        var fishTank = BuiltInRegistries.BLOCK
+            .getOptional(Identifier.fromNamespaceAndPath("anvilcraft", "fish_tank"))
+            .orElse(null);
+        if (fishTank == null) { helper.succeed(); return; }
+        helper.setBlock(1, 1, 1, Blocks.ANVIL);
+        helper.setBlock(1, 2, 1, fishTank);
+        BlockPos tankPos = helper.absolutePos(new BlockPos(1, 2, 1));
+        var be = helper.getLevel().getBlockEntity(tankPos);
+        if (!(be instanceof dev.dubhe.anvilcraft.block.entity.FishTankBlockEntity tank)) {
+            helper.succeed();
+            return;
+        }
+        dev.anvilcraft.thenextforge.event.FishTankFluids.insert(tank, new net.neoforged.neoforge.fluids.FluidStack(dev.dubhe.anvilcraft.init.block.ModFluids.EXP_FLUID.get(), 20000));
+        dev.anvilcraft.thenextforge.event.FishTankSlots.set(tank, 8, new ItemStack(Items.DIAMOND_SWORD));
+        helper.assertTrue(
+            dev.anvilcraft.thenextforge.event.FishTankSlots.get(tank, 8)
+                .getOrDefault(ModDataComponents.FORGING.get(), ForgingData.EMPTY).anvilLevel() == 0,
+            "新对象入场必须是 0 级"
+        );
+        dev.anvilcraft.thenextforge.event.AutomationHandler.applyAutomatedHit(
+            helper.getLevel(), tankPos, Blocks.ANVIL.defaultBlockState()
+        );
+        ItemStack after = dev.anvilcraft.thenextforge.event.FishTankSlots.get(tank, 8);
+        // 基础砧会损毁对象，被毁掉时等级按 0 计
+        int level = after.isEmpty() ? 0
+            : after.getOrDefault(ModDataComponents.FORGING.get(), ForgingData.EMPTY).anvilLevel();
+        helper.assertTrue(level <= 1, "单次结算最多升一级，实际 " + level);
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.FishTankSlots.get(tank.getOutputHandler(), 0).isEmpty(),
+            "无红石信号时不得把对象复制进输出槽");
+        // proxy 8..15 对应 input 0..7，目标占用的是 input 0
+        for (int slot = 1; slot < tank.getInputHandler().size(); slot++) {
+            helper.assertTrue(dev.anvilcraft.thenextforge.event.FishTankSlots.get(tank.getInputHandler(), slot).isEmpty(),
+                "等级只写在目标槽，其他输入槽必须仍为空：slot=" + slot);
+        }
+        for (int slot = 0; slot < tank.getOutputHandler().size(); slot++) {
+            helper.assertTrue(dev.anvilcraft.thenextforge.event.FishTankSlots.get(tank.getOutputHandler(), slot).isEmpty(),
+                "输出槽不得出现目标对象的副本：slot=" + slot);
+        }
+        // 同一槽换一件全新物品：不能继承上一件的等级
+        dev.anvilcraft.thenextforge.event.FishTankSlots.set(tank, 8, new ItemStack(Items.DIAMOND_SWORD));
+        ItemStack fresh = dev.anvilcraft.thenextforge.event.FishTankSlots.get(tank, 8);
+        helper.assertTrue(
+            fresh.getOrDefault(ModDataComponents.FORGING.get(), ForgingData.EMPTY).anvilLevel() == 0,
+            "容器不得把上一件对象的等级复用到新对象"
+        );
+        helper.succeed();
+        });
+        TestRegistry.register(event, "embed_effect_matrix_matches_design", helper -> {
+        var ticker = dev.anvilcraft.thenextforge.event.ForgeItemTicker.class;
+        // 装甲：下界之星 抗性 III、中子锭 抗性 I、红石 速度 I、发光墨囊 夜视
+        var armourStar = dev.anvilcraft.thenextforge.event.ForgeItemTicker.armourEffects(
+            withEmbeds(EMBED_CHEST, "minecraft:nether_star"));
+        helper.assertTrue(hasEffect(armourStar, net.minecraft.world.effect.MobEffects.RESISTANCE, 2),
+            "装甲+下界之星 = 抗性提升 +3");
+        var armourNeutron = dev.anvilcraft.thenextforge.event.ForgeItemTicker.armourEffects(
+            withEmbeds(EMBED_CHEST, "anvilcraft:neutronium_ingot"));
+        helper.assertTrue(hasEffect(armourNeutron, net.minecraft.world.effect.MobEffects.RESISTANCE, 0),
+            "装甲+中子锭 = 抗性提升 +1");
+        var armourRedstone = dev.anvilcraft.thenextforge.event.ForgeItemTicker.armourEffects(
+            withEmbeds(EMBED_CHEST, "minecraft:redstone"));
+        helper.assertTrue(hasEffect(armourRedstone, net.minecraft.world.effect.MobEffects.SPEED, 0),
+            "装甲+红石 = 速度 I");
+        var armourGlow = dev.anvilcraft.thenextforge.event.ForgeItemTicker.armourEffects(
+            withEmbeds(EMBED_CHEST, "minecraft:glow_ink_sac"));
+        helper.assertTrue(hasEffect(armourGlow, net.minecraft.world.effect.MobEffects.NIGHT_VISION, 0),
+            "装甲+发光墨囊 = 夜视");
+
+        // 护符：水下呼吸 / 抗火 / 急迫+速度 / 夜视 / 海洋庇佑 / 抗性(星 III, 合金/中子 I)
+        helper.assertTrue(hasEffect(dev.anvilcraft.thenextforge.event.ForgeItemTicker.amuletEffects(
+            withEmbeds(EMBED_AMULET, "anvilcraft:sapphire")),
+            net.minecraft.world.effect.MobEffects.WATER_BREATHING, 0), "护符+蓝宝石 = 水下呼吸");
+        helper.assertTrue(hasEffect(dev.anvilcraft.thenextforge.event.ForgeItemTicker.amuletEffects(
+            withEmbeds(EMBED_AMULET, "anvilcraft:ruby")),
+            net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE, 0), "护符+红宝石 = 抗火");
+        var amuletRedstone = dev.anvilcraft.thenextforge.event.ForgeItemTicker.amuletEffects(
+            withEmbeds(EMBED_AMULET, "minecraft:redstone"));
+        helper.assertTrue(hasEffect(amuletRedstone, net.minecraft.world.effect.MobEffects.HASTE, 0),
+            "护符+红石 = 急迫 I");
+        helper.assertTrue(hasEffect(amuletRedstone, net.minecraft.world.effect.MobEffects.SPEED, 0),
+            "护符+红石 = 速度 I");
+        helper.assertTrue(hasEffect(dev.anvilcraft.thenextforge.event.ForgeItemTicker.amuletEffects(
+            withEmbeds(EMBED_AMULET, "minecraft:heart_of_the_sea")),
+            net.minecraft.world.effect.MobEffects.CONDUIT_POWER, 0), "护符+海洋之心 = 海洋庇佑");
+        helper.assertTrue(hasEffect(dev.anvilcraft.thenextforge.event.ForgeItemTicker.amuletEffects(
+            withEmbeds(EMBED_AMULET, "minecraft:nether_star")),
+            net.minecraft.world.effect.MobEffects.RESISTANCE, 2), "护符+下界之星 = 抗性 III");
+        helper.assertTrue(hasEffect(dev.anvilcraft.thenextforge.event.ForgeItemTicker.amuletEffects(
+            withEmbeds(EMBED_AMULET, "anvilcraft:netherite_ingot")),
+            net.minecraft.world.effect.MobEffects.RESISTANCE, 0), "护符+下界合金锭 = 抗性 I");
+        helper.assertTrue(hasEffect(dev.anvilcraft.thenextforge.event.ForgeItemTicker.amuletEffects(
+            withEmbeds(EMBED_AMULET, "anvilcraft:neutronium_ingot")),
+            net.minecraft.world.effect.MobEffects.RESISTANCE, 0), "护符+中子锭 = 抗性 I");
+
+        // 每 5 秒的耐久恢复（设计：蓝宝石水中2、红宝石燃烧2、黄玉电网2、原木1、绿宝石1）
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(
+            ForgingData.EMPTY.withEmbed("anvilcraft:sapphire"), true, false, false) == 2, "蓝宝石水中 +2");
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(
+            ForgingData.EMPTY.withEmbed("anvilcraft:ruby"), false, true, false) == 2, "红宝石燃烧 +2");
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(
+            ForgingData.EMPTY.withEmbed("anvilcraft:topaz"), false, false, true) == 2, "黄玉电网 +2");
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(
+            ForgingData.EMPTY.withEmbed("#minecraft:logs"), false, false, false) == 1, "原木 +1");
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeItemTicker.repairAmount(
+            ForgingData.EMPTY.withEmbed("minecraft:emerald"), false, false, false) == 0, "绿宝石不再是每 5 秒回复");
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeItemTicker.hasRedstoneHaste(
+            ForgingData.EMPTY.withEmbed("minecraft:redstone")), "红石 = 急迫来源");
+        helper.assertTrue(ticker != null, "ticker 可读");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "embed_combinations_stack_and_respect_slots", helper -> {
+        var mul = net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADD_MULTIPLIED_BASE;
+        var add = net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADD_VALUE;
+        // 武器三槽：石英 +20% + 金锭 +50% + 下界之星 +100% = +170%
+        ItemStack sword = itemById(EMBED_SWORD);
+        for (String id : new String[]{"minecraft:quartz", "minecraft:gold_ingot", "minecraft:nether_star"}) {
+            var definition = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(itemById(id));
+            dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(sword, definition, TargetKind.WEAPON, 1, helper.getLevel());
+        }
+        helper.assertTrue(near(embedAmount(sword, Attributes.ATTACK_DAMAGE, mul), 1.70),
+            "三件武器嵌入应线性叠加到 +170%，实际 " + embedAmount(sword, Attributes.ATTACK_DAMAGE, mul));
+        // 护符：石英 +20% + 下界之星 +100% + 皇家 +10% 伤害，皇家再 +1 护甲
+        ItemStack amulet = itemById(EMBED_AMULET);
+        for (String id : new String[]{"minecraft:quartz", "minecraft:nether_star", "anvilcraft:royal_steel_ingot"}) {
+            var definition = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(itemById(id));
+            dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(amulet, definition, TargetKind.AMULET, 1, helper.getLevel());
+        }
+        helper.assertTrue(near(embedAmount(amulet, Attributes.ATTACK_DAMAGE, mul), 1.30),
+            "护符三件叠加应 +130% 伤害，实际 " + embedAmount(amulet, Attributes.ATTACK_DAMAGE, mul));
+        helper.assertTrue(near(embedAmount(amulet, Attributes.ARMOR, add), 1.0), "护符上皇家 +1 护甲");
+        // 槽位：工具/武器 3，装甲/护符 1；超限合金粒 +1
+        helper.assertTrue(TargetKind.TOOL.slots() == 3 && TargetKind.WEAPON.slots() == 3,
+            "工具与武器各 3 槽");
+        helper.assertTrue(TargetKind.ARMOR.slots() == 1 && TargetKind.AMULET.slots() == 1,
+            "装甲与护符各 1 槽");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "diamond_embed_grants_diamond_mining_tier", helper -> {
+        var diamond = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.DIAMOND));
+        helper.assertTrue(diamond != null, "钻石必须是可嵌入材料");
+
+        ItemStack pick = new ItemStack(Items.WOODEN_PICKAXE);
+        var before = pick.get(net.minecraft.core.component.DataComponents.TOOL);
+        helper.assertTrue(before != null && !before.isCorrectForDrops(Blocks.DIAMOND_ORE.defaultBlockState()),
+            "木镐挖钻石矿本来不掉落");
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(pick, diamond, TargetKind.TOOL, 1, helper.getLevel());
+        var after = pick.get(net.minecraft.core.component.DataComponents.TOOL);
+        helper.assertTrue(after != null && after.isCorrectForDrops(Blocks.DIAMOND_ORE.defaultBlockState()),
+            "嵌入钻石后钻石矿必须掉落（钻石等级）");
+        helper.assertTrue(after.isCorrectForDrops(Blocks.OBSIDIAN.defaultBlockState()),
+            "黑曜石也必须掉落（钻石等级）");
+        helper.assertTrue(after.isCorrectForDrops(Blocks.STONE.defaultBlockState()),
+            "原本能挖的石头保持可挖（并集）");
+        helper.assertTrue(!after.isCorrectForDrops(Blocks.DIRT.defaultBlockState()),
+            "钻石镐本来就挖不了泥土，嵌入后也不能掉落（不越界）");
+        helper.assertTrue(near(after.getMiningSpeed(Blocks.DIAMOND_ORE.defaultBlockState()), 2.0F),
+            "只升等级不搬速度：木镐挖钻石矿仍是 2.0，实际 " + after.getMiningSpeed(Blocks.DIAMOND_ORE.defaultBlockState()));
+
+        ItemStack axe = new ItemStack(Items.WOODEN_AXE);
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(axe, diamond, TargetKind.TOOL, 1, helper.getLevel());
+        var axeTool = axe.get(net.minecraft.core.component.DataComponents.TOOL);
+        helper.assertTrue(axeTool != null && axeTool.isCorrectForDrops(Blocks.OAK_LOG.defaultBlockState()),
+            "斧头本来的木头照样可挖（并集）");
+        helper.assertTrue(axeTool != null && axeTool.isCorrectForDrops(Blocks.DIAMOND_ORE.defaultBlockState()),
+            "斧头也获得钻石镐的挖掘等级");
+        helper.succeed();
+        });
+        TestRegistry.register(event, "emerald_embed_repairs_at_mending_rate", helper -> {
+        // 兑换率复刻原版 ExperienceOrb#repairPlayerItems
+        var full = dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.repairForXp(10, 50);
+        helper.assertTrue(full.repaired() == 20 && full.leftoverXp() == 0,
+            "10 经验 = 20 耐久，修不满时按比例退回经验：实际 " + full);
+        var partial = dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.repairForXp(10, 5);
+        helper.assertTrue(partial.repaired() == 5 && partial.leftoverXp() == 8,
+            "只需 5 耐久时只花 2.5 经验，剩 8 点继续修下一件：实际 " + partial);
+        var none = dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.repairForXp(0, 5);
+        helper.assertTrue(none.repaired() == 0 && none.leftoverXp() == 0, "没有经验就不修");
+
+        // 端到端：手持带绿宝石嵌入的损坏剑，拾取经验后按 2 倍修复
+        var player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:emerald"));
+        sword.setDamageValue(100);
+        player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, sword);
+        int repaired = dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.repairEmbeddedFromXp(player, 6);
+        helper.assertTrue(repaired == 12, "6 点经验应修复 12 点耐久，实际 " + repaired);
+        helper.assertTrue(player.getMainHandItem().getDamageValue() == 88,
+            "耐久应从 100 修复到 88，实际 " + player.getMainHandItem().getDamageValue());
+
+        // 没有绿宝石嵌入的物品不参与
+        ItemStack plain = new ItemStack(Items.DIAMOND_SWORD);
+        plain.setDamageValue(100);
+        player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, plain);
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeHarvestEvents.repairEmbeddedFromXp(player, 6) == 0,
+            "没有绿宝石嵌入时不应被经验修补");
+        helper.succeed();
+        });
+    }
+
+    private static ItemStack itemById(String id) {
+        return net.minecraft.core.registries.BuiltInRegistries.ITEM
+            .getOptional(Identifier.parse(id))
+            .map(ItemStack::new)
+            .orElse(ItemStack.EMPTY);
+    }
+
+    private static boolean near(double a, double b) {
+        return Math.abs(a - b) < 1e-9;
+    }
+
+    private static int modifiers(ItemStack stack) {
+        net.minecraft.world.item.component.ItemAttributeModifiers mods = stack.getOrDefault(net.minecraft.core.component.DataComponents.ATTRIBUTE_MODIFIERS, net.minecraft.world.item.component.ItemAttributeModifiers.EMPTY);
+        return mods.modifiers().size();
+    }
+
+    private static ItemStack withEmbeds(String itemId, String... embedIds) {
+        ItemStack stack = itemById(itemId);
+        if (stack.isEmpty()) return stack;
+        ForgingData data = ForgingData.EMPTY;
+        for (String id : embedIds) data = data.withEmbed(id);
+        stack.set(ModDataComponents.FORGING.get(), data);
+        return stack;
+    }
+
+    private static ItemStack strengthenedSword(int level) {
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withLevel(ForgingLine.ANVIL, level));
+        return sword;
+    }
+
+    private static void fillExperience(dev.dubhe.anvilcraft.block.entity.FishTankBlockEntity tank) {
+        dev.anvilcraft.thenextforge.event.FishTankFluids.insert(tank, new net.neoforged.neoforge.fluids.FluidStack(dev.dubhe.anvilcraft.init.block.ModFluids.EXP_FLUID.get(), 20000));
+    }
+
+    private static String sampleItem(TargetKind kind) {
+        return switch (kind) {
+            case WEAPON -> EMBED_SWORD;
+            case TOOL -> EMBED_PICK;
+            case ARMOR -> EMBED_CHEST;
+            case AMULET -> EMBED_AMULET;
+        };
+    }
+
+    private static ItemStack applyEmbed(GameTestHelper helper, String materialId, TargetKind kind) {
+        ItemStack stack = itemById(sampleItem(kind));
+        ItemStack material = itemById(materialId);
+        var definition = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(material);
+        if (stack.isEmpty() || definition == null) return ItemStack.EMPTY;
+        dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(stack, definition, kind, 1, helper.getLevel());
+        return stack;
+    }
+
+    private static int fortuneLevel(GameTestHelper helper, ItemStack stack) {
+        var key = net.minecraft.resources.ResourceKey.create(
+            net.minecraft.core.registries.Registries.ENCHANTMENT,
+            Identifier.withDefaultNamespace("fortune"));
+        var lookup = helper.getLevel().registryAccess()
+            .lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT);
+        var holder = lookup.get(key);
+        if (holder.isEmpty()) return -1;
+        return stack.getOrDefault(net.minecraft.core.component.DataComponents.ENCHANTMENTS,
+            net.minecraft.world.item.enchantment.ItemEnchantments.EMPTY).getLevel(holder.get());
+    }
+
+    private static ForgingData forgingOf(ItemStack stack) {
+        return stack.getOrDefault(ModDataComponents.FORGING.get(), ForgingData.EMPTY);
+    }
+
+    private static float transformationScale(net.minecraft.world.entity.Display.ItemDisplay display) {
+        net.minecraft.nbt.CompoundTag tag = new net.minecraft.nbt.CompoundTag();
+        display.saveWithoutId(tag);
+        var transformation = com.mojang.math.Transformation.EXTENDED_CODEC
+            .parse(net.minecraft.nbt.NbtOps.INSTANCE, tag.get("transformation")).getOrThrow();
+        return transformation.getScale().x();
+    }
+
+    private static String displayContext(net.minecraft.world.entity.Display.ItemDisplay display) {
+        net.minecraft.nbt.CompoundTag tag = new net.minecraft.nbt.CompoundTag();
+        display.saveWithoutId(tag);
+        return tag.getString("item_display");
+    }
+
+    private static double modifierAmount(ItemStack stack, net.minecraft.core.Holder<net.minecraft.world.entity.ai.attributes.Attribute> attribute) {
+        var mods = stack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS,
+            net.minecraft.world.item.component.ItemAttributeModifiers.EMPTY);
+        double sum = 0;
+        for (var entry : mods.modifiers()) {
+            if (entry.attribute().equals(attribute)) {
+                sum += entry.modifier().amount();
+            }
+        }
+        return sum;
+    }
+
+private static boolean hasEffect(java.util.List<net.minecraft.world.effect.MobEffectInstance> effects,
+                                     net.minecraft.core.Holder<net.minecraft.world.effect.MobEffect> effect, int amplifier) {
+        for (var e : effects) {
+            if (e.getEffect().equals(effect) && e.getAmplifier() == amplifier) return true;
+        }
+        return false;
+    }
+
+}

@@ -1,0 +1,14 @@
+dependencies {
+    api(libs.anvillib)
+    api(libs.anvillib.config)
+    interfaceInjectionData(libs.anvillib.recipe)
+    interfaceInjectionData(libs.anvillib.moveableEntityBlock)
+    api(libs.ageratum)
+    implementation(libs.anvilcraft) { transitive = false }
+    interfaceInjectionData(libs.anvilcraft) { transitive = false }
+
+    // JEI：编译期 API + 运行时（BlameJared maven）
+    compileOnly(libs.jei.common.api)
+    compileOnly(libs.jei.neoforge.api)
+    runtimeOnly(libs.jei.neoforge)
+}

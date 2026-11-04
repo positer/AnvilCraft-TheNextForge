@@ -1,0 +1,11 @@
+dependencies {
+    api(libs.anvillib)
+    interfaceInjectionData(libs.anvillibRecipe)
+    interfaceInjectionData(libs.anvillibMoveableEntityBlock)
+    api(libs.ageratum)
+    implementation(libs.anvilcraft) { transitive = false }
+    interfaceInjectionData(libs.anvilcraft) { transitive = false }
+    // JEI 只用于把嵌入材料矩阵写进材料的 JEI 信息页：编译期需要 API，开发运行时需要本体
+    compileOnly "mezz.jei:jei-1.21.1-neoforge-api:19.70.0.469"
+    runtimeOnly "mezz.jei:jei-1.21.1-neoforge:19.21.0.247"
+}

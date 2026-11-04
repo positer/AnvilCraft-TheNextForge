@@ -1,0 +1,25 @@
+plugins {
+    id 'java-library'
+    id 'idea'
+    alias libs.plugins.modDevGradle
+}
+
+version = "${mod_version}"
+group = maven_group
+
+apply from: "$rootDir/gradle/scripts/moddevgradle.gradle"
+apply from: "$rootDir/gradle/scripts/repositories.gradle"
+apply from: "$rootDir/dependencies.gradle"
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(java_version)
+
+sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+// 测试与验证用的类只在开发环境编译运行，发行包里不带这些类
+tasks.named('jar') {
+    exclude 'dev/anvilcraft/thenextforge/gametest/**'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}

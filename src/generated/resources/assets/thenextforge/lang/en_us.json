@@ -1,0 +1,14 @@
+{
+  "thenextforge.configuration.log_dirt_block": "Log Dirt Block",
+  "thenextforge.configuration.log_dirt_block.tooltip": "Whether to log the dirt block on common setup",
+  "thenextforge.configuration.magic_number": "Magic Number",
+  "thenextforge.configuration.magic_number.tooltip": "A magic number",
+  "thenextforge.configuration.magic_number_introduction": "Magic Number Introduction",
+  "thenextforge.configuration.magic_number_introduction.tooltip": "What you want the introduction message to be for the magic number",
+  "thenextforge.configuration.section.thenextforge.common.toml": "Anvilcraft Addon Template Common Configuration",
+  "thenextforge.configuration.section.thenextforge.common.toml.title": "Anvilcraft Addon Template Common Configuration",
+  "thenextforge.configuration.title": "Anvilcraft Addon Template Configuration",
+  "block.thenextforge.example_block": "Example Block",
+  "item.thenextforge.example_item": "Example Item",
+  "itemGroup.thenextforge.addon_items": "AnvilCraft: Addon Template"
+}

@@ -1,0 +1,34 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+
+[[mods]]
+modId="thenextforge"
+version="${file.jarVersion}"
+displayName="AnvilCraft: TheNextForge"
+description="AnvilCraft forging expansion"
+
+[[dependencies.thenextforge]]
+modId="neoforge"
+type="required"
+versionRange="[26.1.2.114,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.thenextforge]]
+modId="minecraft"
+type="required"
+versionRange="[26.1,26.2)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.thenextforge]]
+modId="anvilcraft"
+type="required"
+versionRange="*"
+ordering="NONE"
+side="BOTH"
+
+# 自建渲染/渲染放大 mixin：FML 只加载这里声明的配置
+[[mixins]]
+config = "thenextforge.mixins.json"

@@ -1,0 +1,58 @@
+repositories {
+    maven { // Optional EMI 26.1 API
+        name = "Curse Maven"
+        url = "https://www.cursemaven.com/"
+        content {
+            includeModule "curse.maven", "emi-unofficial-port-unstable-1544558"
+        }
+    }
+    mavenLocal()
+    exclusiveContent {
+        forRepositories(
+            mavenCentral(),
+            maven { // Anvil Lib
+                name = "Cjsah Maven"
+                url = "https://server.cjsah.net:1002/maven/"
+                content {
+                    includeGroup "dev.anvilcraft.lib"
+                    includeGroup "dev.anvilcraft.resource"
+                    includeGroup "dev.dubhe"
+                }
+            }
+        )
+        filter {
+            includeGroup "dev.anvilcraft.lib"
+            includeGroup "dev.anvilcraft.resource"
+            includeGroup "dev.dubhe"
+        }
+    }
+    maven { // Iris, Jade
+        name = "Modrinth Maven"
+        url = "https://api.modrinth.com/maven"
+        content {
+            includeGroup "maven.modrinth"
+        }
+    }
+    maven { // Sodium
+        name = "CaffeineMC"
+        url = "https://maven.caffeinemc.net/releases"
+        content {
+            includeGroup "net.caffeinemc"
+        }
+    }
+    maven { // JEI + 它自己的 MezzConfig 依赖（同为 BlameJared maven）
+        name = "Jared's maven"
+        url = "https://maven.blamejared.com/"
+        content {
+            includeGroup "mezz.jei"
+            includeGroup "net.mezzdev.config"
+        }
+    }
+    maven { // Curios API
+        name = "Illusive Soulworks maven"
+        url = "https://maven.theillusivec4.top/"
+        content {
+            includeGroup "top.theillusivec4.curios"
+        }
+    }
+}

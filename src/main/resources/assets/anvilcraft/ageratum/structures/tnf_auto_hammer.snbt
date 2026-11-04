@@ -1,0 +1,14 @@
+{
+    DataVersion: 3955,
+    size: [3, 3, 3],
+    data: [
+        {pos: [1, 0, 1], state: "minecraft:anvil{facing:west}"},
+        {pos: [1, 1, 1], state: "anvilcraft:fish_tank"},
+        {pos: [1, 2, 1], state: "minecraft:anvil{facing:west}"}
+    ],
+    entities: [],
+    palette: [
+        "minecraft:anvil{facing:west}",
+        "anvilcraft:fish_tank"
+    ]
+}

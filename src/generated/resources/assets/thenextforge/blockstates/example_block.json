@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "thenextforge:block/example_block"
+    }
+  }
+}
