@@ -18,6 +18,10 @@ sourceSets.main.resources { srcDir 'src/generated/resources' }
 // 测试与验证用的类只在开发环境编译运行，发行包里不带这些类
 tasks.named('jar') {
     exclude 'dev/anvilcraft/thenextforge/gametest/**'
+    manifest {
+        // mods.toml 的 version 是 ${file.jarVersion}，由清单里的 Implementation-Version 提供
+        attributes('Implementation-Version': project.version)
+    }
 }
 
 tasks.withType(JavaCompile).configureEach {
