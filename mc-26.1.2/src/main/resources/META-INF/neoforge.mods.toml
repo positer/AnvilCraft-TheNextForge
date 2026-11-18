@@ -6,6 +6,7 @@ license="MIT"
 modId="thenextforge"
 version="${file.jarVersion}"
 displayName="AnvilCraft: TheNextForge"
+logoFile="thenextforge.png"
 description="AnvilCraft forging expansion"
 
 [[dependencies.thenextforge]]
