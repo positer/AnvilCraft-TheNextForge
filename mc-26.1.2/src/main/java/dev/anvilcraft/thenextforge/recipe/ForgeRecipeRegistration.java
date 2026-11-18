@@ -11,6 +11,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +22,7 @@ import java.util.List;
  * <p>用 {@code ON_ANVIL_FALL_ON} 触发器与「落点下方鱼缸、鱼缸下方砧/砂轮」的谓词，
  * 优先级高于鱼缸本体配方，因此不需要 mixin 就能接管落砧。
  */
+@EventBusSubscriber(modid = TheNextForge.MOD_ID)
 public final class ForgeRecipeRegistration {
     /**
      * 配方优先级。
@@ -46,8 +48,8 @@ public final class ForgeRecipeRegistration {
 
         // Registry 本身实现了 HolderGetter，可直接传给 of(HolderGetter, TagKey)
         var tankPredicate = HasBlock.builder().below().of(fishTank).build();
-        var anvilBase = HasBlock.builder().below(2).of(net.minecraft.core.registries.BuiltInRegistries.BLOCK, BlockTags.ANVIL).build();
-        var grindstoneBase = HasBlock.builder().below(2).of(grindstoneBlocks()).build();
+        var anvilBase = new ForgeBasePredicate(dev.anvilcraft.thenextforge.forging.ForgingLine.ANVIL);
+        var grindstoneBase = new ForgeBasePredicate(dev.anvilcraft.thenextforge.forging.ForgingLine.GRINDSTONE);
 
         recipes.add(new RecipeHolder<>(
             net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.RECIPE,

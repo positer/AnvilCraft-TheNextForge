@@ -47,6 +47,9 @@ public enum TargetKind {
      * <p>主角色仍是 {@link #of} 的结果（决定升级线判定），这里是加成与描述的并集。
      */
     public static java.util.List<TargetKind> rolesOf(ItemStack stack) {
+        if (stack.isEmpty() || !ForgeRulesData.isTargetAllowed(stack)) return java.util.List.of();
+        var mapped = dev.anvilcraft.thenextforge.api.TnfApi.target(stack);
+        if (mapped != null) return mapped.enabled() ? mapped.roles() : java.util.List.of();
         TargetKind primary = of(stack);
         if (primary == null) return java.util.List.of();
         if (primary == TargetKind.TOOL && isWeaponizableTool(stack)) {
@@ -66,6 +69,8 @@ public enum TargetKind {
         if (stack.isEmpty()) return null;
         // 设计 L19：对象集合走数据驱动的黑白名单
         if (!ForgeRulesData.isTargetAllowed(stack)) return null;
+        var mapped = dev.anvilcraft.thenextforge.api.TnfApi.target(stack);
+        if (mapped != null) return mapped.enabled() && !mapped.roles().isEmpty() ? mapped.roles().getFirst() : null;
         ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (id.getPath().endsWith("_amulet")) return AMULET;
         // 设计：龙杖 / 铁砧锤 也算工具（它们继承 Item，没有原版工具标签，只能按铁砧工艺的标签判）

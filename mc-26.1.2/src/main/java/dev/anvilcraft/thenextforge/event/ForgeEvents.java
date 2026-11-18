@@ -27,6 +27,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
  * <p>三者共用右键：主手持铁砧锤锤击，Shift 右键放置或取下装备。原版与铁砧工艺的右键行为在命中这些
  * 情形时被取消，其余情况放行。
  */
+@EventBusSubscriber(modid = TheNextForge.MOD_ID)
 public final class ForgeEvents {
     private ForgeEvents() {
     }
@@ -189,7 +190,7 @@ public final class ForgeEvents {
             TheNextForge.LOGGER.info("[TNF] forge place attempt kind={} stack={}", kind, mainHand);
             if (kind == null) return;
             // 砂轮的限制不再挡放置：允许放上去（这样才能用海绵芽取出嵌入），到真正锤击升级时才提示
-            if (line == ForgingLine.GRINDSTONE && !kind.canUseGrindstone()) {
+            if (line == ForgingLine.GRINDSTONE && !dev.anvilcraft.thenextforge.api.TnfApi.canUseLine(mainHand, line)) {
                 TheNextForge.LOGGER.info("[TNF] placed a non-grindstone target on a grindstone (upgrade will be refused)");
             }
             String name = mainHand.getHoverName().getString();

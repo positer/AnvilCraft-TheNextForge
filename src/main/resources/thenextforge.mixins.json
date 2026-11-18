@@ -3,9 +3,16 @@
   "minVersion": "0.8",
   "package": "dev.anvilcraft.thenextforge.mixin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [],
+  "mixins": [
+    "SilentGearRecalculateMixin",
+    "SilentGearItemMixin",
+    "ItemStackDurabilityMixin",
+    "SilentGearDurabilityMixin"
+  ],
   "client": [
-    "ItemRendererMixin"
+    "QualityArmorMixin",
+    "ItemRendererMixin",
+    "ItemDisplayRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

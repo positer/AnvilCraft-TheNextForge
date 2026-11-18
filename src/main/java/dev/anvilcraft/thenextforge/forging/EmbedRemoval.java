@@ -44,15 +44,27 @@ public final class EmbedRemoval {
 
         List<String> remaining = new ArrayList<>(data.embeds());
         String removedId = remaining.remove(remaining.size() - 1);
+        boolean managed = dev.anvilcraft.thenextforge.api.ManagedEmbeddings.remove(stack, removedId, remaining.size(), level);
         stack.set(ModDataComponents.FORGING.get(), data.withEmbeds(remaining));
+        if (managed) {
+            ForgeDurability.rebaseDynamic(stack);
+            dev.anvilcraft.thenextforge.api.TnfApi.publishDataChange(stack, data, data.withEmbeds(remaining));
+            return materialStack(removedId);
+        }
 
         stripModifiers(stack, removedId);
         revertDurability(stack, removedId);
         revertFortune(stack, removedId);
         revertUnbreakable(stack, removedId);
+        if ("minecraft:diamond".equals(removedId) && !remaining.contains(removedId)) {
+            var original = stack.remove(ModDataComponents.PRE_EMBED_TOOL.get());
+            if (original != null) stack.set(DataComponents.TOOL, original);
+        }
 
+        ForgeDurability.rebaseDynamic(stack);
         ItemStack removed = materialStack(removedId);
         TheNextForge.LOGGER.info("[TNF] sponge gemmule removed embed {} ({} left)", removedId, remaining.size());
+        dev.anvilcraft.thenextforge.api.TnfApi.publishDataChange(stack, data, data.withEmbeds(remaining));
         return removed;
     }
 
@@ -62,10 +74,19 @@ public final class EmbedRemoval {
             DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY);
         String prefix = "embed/" + materialId.substring(materialId.indexOf(':') + 1) + "/";
         List<ItemAttributeModifiers.Entry> kept = new ArrayList<>(modifiers.modifiers().size());
+        int latest = modifiers.modifiers().stream()
+            .filter(entry -> TheNextForge.MOD_ID.equals(entry.modifier().id().getNamespace())
+                && entry.modifier().id().getPath().startsWith(prefix))
+            .mapToInt(entry -> {
+                String path = entry.modifier().id().getPath();
+                try { return Integer.parseInt(path.substring(path.lastIndexOf('/') + 1)); }
+                catch (NumberFormatException ignored) { return -1; }
+            }).max().orElse(-1);
         boolean changed = false;
         for (ItemAttributeModifiers.Entry entry : modifiers.modifiers()) {
             ResourceLocation id = entry.modifier().id();
-            if (TheNextForge.MOD_ID.equals(id.getNamespace()) && id.getPath().startsWith(prefix)) {
+            if (TheNextForge.MOD_ID.equals(id.getNamespace()) && id.getPath().startsWith(prefix)
+                && (latest < 0 || id.getPath().endsWith("/" + latest))) {
                 changed = true;
                 continue;
             }
@@ -92,6 +113,7 @@ public final class EmbedRemoval {
         TargetKind kind = TargetKind.of(stack);
         if (!EmbedMaterials.durabilityApplies(materialId, kind)) return;
         double factor = EmbedMaterials.durabilityFactor(materialId, kind);
+        if (factor != 1.0D && ForgeDurability.scaleBaseline(stack, 1.0D / factor)) return;
         Integer max = stack.get(DataComponents.MAX_DAMAGE);
         if (factor == 1.0D || max == null || max <= 1) return;
         int restored = Math.max(1, (int) Math.round(max / factor));
@@ -121,6 +143,8 @@ public final class EmbedRemoval {
 
     private static void revertUnbreakable(ItemStack stack, String materialId) {
         if (!EmbedMaterials.grantsUnbreakable(materialId)) return;
+        ForgingData remaining = stack.getOrDefault(ModDataComponents.FORGING.get(), ForgingData.EMPTY);
+        if (remaining.embeds().stream().anyMatch(EmbedMaterials::grantsUnbreakable)) return;
         stack.remove(DataComponents.UNBREAKABLE);
     }
 

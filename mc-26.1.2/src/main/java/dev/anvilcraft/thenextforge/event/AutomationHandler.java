@@ -137,7 +137,7 @@ public final class AutomationHandler {
         }
 
         // 设计 L23/L36：工具与护符不能用砂轮升级（放置允许，结算时拒绝）
-        if (line == ForgingLine.GRINDSTONE && !kind.canUseGrindstone()) {
+        if (line == ForgingLine.GRINDSTONE && !TargetKind.rolesOf(stack).contains(TargetKind.WEAPON) && kind != TargetKind.ARMOR) {
             TheNextForge.LOGGER.info("[TNF] automation refused: {} cannot be upgraded on a grindstone", kind);
             return false;
         }
@@ -169,101 +169,35 @@ public final class AutomationHandler {
             TheNextForge.LOGGER.info("[TNF] automation stops at the level cap {}/{}", current, ForgingRules.MAX_AUTOMATION_LEVEL);
             return false;
         }
-        int cost = ForgingRules.experienceCost(current);
-        if (!consumeExperience(level, pos, cost)) {
-            TheNextForge.LOGGER.info("[TNF] automation rejected: not enough experience fluid at {}", pos);
-            return false;
-        }
-
-        boolean success = random.nextDouble() < ForgingRules.successRate(current);
-        if (success) {
-            int newLevel = current + 1;
-            data = data.withLevel(line, newLevel);
-            ForgingRules.applyUpgrade(stack, kind, line, newLevel, level.getRandom());
-            // 嵌入材料：鱼缸第二个槽位放允许的材料时，成功即嵌入
-            ItemStack material = materialSlot;
-            var definition = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(material);
-            // 与守卫同一口径：多角色对象的材料集取并集（此前这里仍是单角色 allows(kind)）
-            boolean allowed = definition != null
-                && dev.anvilcraft.thenextforge.forging.EmbedMaterials.allowsFor(definition, stack);
-            boolean uniqueBlocked = definition != null && definition.unique() && data.hasEmbed(definition.id());
-            int slots = dev.anvilcraft.thenextforge.forging.EmbedMaterials.slotCount(kind, data);
-            if (definition != null && !uniqueBlocked && data.embeds().size() >= slots) {
-                TheNextForge.LOGGER.info("[TNF] automation embed skipped: slots full ({}/{})", data.embeds().size(), slots);
-            }
-            if (definition != null && allowed && !uniqueBlocked && data.embeds().size() < slots) {
-                material.shrink(1);
-                data = data.withEmbed(definition.id());
-                dev.anvilcraft.thenextforge.forging.EmbedMaterials.applyForRoles(stack, definition, newLevel, level);
-                if (materialSlotIndex >= 0) FishTankSlots.set(tank, materialSlotIndex, material.isEmpty() ? ItemStack.EMPTY : material);
-                TheNextForge.LOGGER.info("[TNF] automation embedded {}", definition.id());
-            }
-            ForgingRules.write(stack, data);
-            FishTankSlots.set(tank, targetSlot, stack);
-            {
-                StringBuilder idb = new StringBuilder();
-                for (int s = 8; s < 16; s++) {
-                    ItemStack it = FishTankSlots.get(tank, s);
-                    if (!it.isEmpty()) idb.append(s).append("#").append(System.identityHashCode(it)).append("=").append(it.getItem()).append(" ");
+        final int selectedSlot = targetSlot;
+        final int embedSlot = materialSlotIndex;
+        final boolean[] paid = {false};
+        dev.anvilcraft.thenextforge.forging.ForgingService.settle(
+            new dev.anvilcraft.thenextforge.forging.ForgingService.StrikeAccess() {
+                public ItemStack material() { return materialSlot; }
+                public net.minecraft.util.RandomSource random() { return random; }
+                public boolean pay(int cost) {
+                    paid[0] = consumeExperience(level, pos, cost);
+                    return paid[0];
                 }
-                TheNextForge.LOGGER.info("[TNF] identity before write: stack#{} [{}]", System.identityHashCode(stack), idb.toString().trim());
-            }
-            {
-                StringBuilder after = new StringBuilder();
-                for (int s = 8; s < 16; s++) {
-                    ItemStack it = FishTankSlots.get(tank, s);
-                    if (!it.isEmpty()) after.append(s).append('=').append(it.getItem()).append('x').append(it.getCount()).append(' ');
+                public void refund(int xp) { fillRefund(tank, xp); }
+                // 自动化没有操作者，不虚构玩家着火和扣血。
+                public boolean onFire() { return false; }
+                public void rubyCost() { }
+                public void save(ItemStack result) {
+                    FishTankSlots.set(tank, selectedSlot, result);
+                    if (embedSlot >= 0) FishTankSlots.set(tank, embedSlot, materialSlot);
                 }
-                TheNextForge.LOGGER.info("[TNF] tank after write-back: [{}]", after.toString().trim());
-            }
-            if (!silent) {
-                dev.anvilcraft.thenextforge.forging.ForgingService.playSuccessEffect(level, pos, newLevel);
-            }
-            TheNextForge.LOGGER.info("[TNF] automated hit success {} -> {}", current, newLevel);
-            tryOutput(level, pos, tank, newLevel, targetSlot);
-            return true;
-        } else {
-            if (random.nextDouble() < 0.5) {
-                // 顺序即设计：超限（基底或锤）只降级；只有本来会被摧毁时才轮到超限合金粒把摧毁换成归零
-                ForgingRules.FailureOutcome outcome = ForgingRules.failureOutcome(
-                    base.isSafe(), hammer.isSafe(), data.hasEmbed(ForgingRules.TRANSCENDIUM_EMBED));
-                if (outcome == ForgingRules.FailureOutcome.RESET_TO_ZERO) {
-                    if (amulets.contains("dog")) {
-                        int refund = ForgingRules.refundForDegrade(current, 0);
-                        if (refund > 0) {
-                            fillRefund(tank, refund);
-                            TheNextForge.LOGGER.info("[TNF] automatic dog refunded {} xp as fluid on transcendium reset", refund);
-                        }
-                    }
-                    data = ForgingRules.resetToZero(data, line);
-                    ForgingRules.write(stack, data);
-                    FishTankSlots.set(tank, targetSlot, stack);
-                    TheNextForge.LOGGER.info("[TNF] automated hit destroyed embed reset to 0");
-                } else if (outcome == ForgingRules.FailureOutcome.DEGRADE) {
-                    int newLevel = ForgingRules.degradedLevel(current, base.isSafe(), hammer.isSafe());
-                    if (amulets.contains("dog")) {
-                        int refund = ForgingRules.refundForDegrade(current, newLevel);
-                        if (refund > 0) {
-                            fillRefund(tank, refund);
-                            TheNextForge.LOGGER.info("[TNF] automatic dog refunded {} xp as fluid on overlimit degrade", refund);
-                        }
-                    }
-                    data = ForgingRules.applyFailure(data, line, current, base.isSafe(), hammer.isSafe());
-                    ForgingRules.write(stack, data);
-                    FishTankSlots.set(tank, targetSlot, stack);
-                    TheNextForge.LOGGER.info("[TNF] automated hit degraded to {}", newLevel);
-                } else {
-                    FishTankSlots.set(tank, targetSlot, ItemStack.EMPTY);
-                    TheNextForge.LOGGER.info("[TNF] automated hit destroyed the item");
-                }
-            } else {
-                TheNextForge.LOGGER.info("[TNF] automated hit no damage, level stays {}", current);
-            }
-            ItemStack after = FishTankSlots.get(tank, targetSlot);
+                public void destroy() { FishTankSlots.set(tank, selectedSlot, ItemStack.EMPTY); }
+                public void message(net.minecraft.network.chat.Component message) { }
+            }, stack.copy(), level, pos.below(), line, base, hammer);
+        if (!paid[0]) return false;
+        ItemStack after = FishTankSlots.get(tank, selectedSlot);
+        if (!after.isEmpty()) {
             ForgingData afterData = after.getOrDefault(ModDataComponents.FORGING.get(), ForgingData.EMPTY);
             tryOutput(level, pos, tank, afterData.level(line), targetSlot);
-            return true;
         }
+        return true;
     }
 
     /**
@@ -348,76 +282,44 @@ public final class AutomationHandler {
      *
      * @return 是否扣成功
      */
+    /** 固定 124 个候选偏移：先六邻接，再半径 2 方盒，不在每锤重建和去重。 */
+    private static final java.util.List<BlockPos> EXPERIENCE_OFFSETS = experienceOffsets();
+
+    private static java.util.List<BlockPos> experienceOffsets() {
+        java.util.List<BlockPos> result = new java.util.ArrayList<>();
+        for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) result.add(BlockPos.ZERO.relative(direction));
+        for (int dx = -2; dx <= 2; dx++) for (int dy = -2; dy <= 2; dy++) for (int dz = -2; dz <= 2; dz++) {
+            if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 1) result.add(new BlockPos(dx, dy, dz));
+        }
+        return java.util.List.copyOf(result);
+    }
+
     public static boolean consumeExperience(net.minecraft.world.level.Level level, BlockPos pos, int xpCost) {
+        if (xpCost <= 0 || xpCost > Integer.MAX_VALUE / MB_PER_XP) return false;
         if (!(level.getBlockEntity(pos) instanceof FishTankBlockEntity tank)) return false;
         int needed = xpCost * MB_PER_XP;
-        if (needed <= 0) return true;
-
-        int drawn = drainExperience(tank, needed);
-        if (drawn >= needed) return true;
-
-        // 邻接供能：从相邻方块/大范围的流体储罐抽经验（26.1.2 走 Transfer API 的 Capabilities.Fluid.BLOCK）
-        int remaining = needed - drawn;
-        java.util.List<BlockPos> candidates = new java.util.ArrayList<>();
-        for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) {
-            candidates.add(pos.relative(direction));
-        }
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dy = -2; dy <= 2; dy++) {
-                for (int dz = -2; dz <= 2; dz++) {
-                    if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) <= 1) continue;
-                    BlockPos candidate = pos.offset(dx, dy, dz);
-                    if (!candidates.contains(candidate)) candidates.add(candidate);
+        java.util.Set<net.neoforged.neoforge.transfer.ResourceHandler<net.neoforged.neoforge.transfer.fluid.FluidResource>> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        var resource = net.neoforged.neoforge.transfer.fluid.FluidResource.of(new net.neoforged.neoforge.fluids.FluidStack(
+            dev.dubhe.anvilcraft.init.block.ModFluids.EXP_FLUID.get(), 1));
+        try (var transaction = net.neoforged.neoforge.transfer.transaction.Transaction.openRoot()) {
+            int remaining = needed;
+            for (int i = -1; i < EXPERIENCE_OFFSETS.size() && remaining > 0; i++) {
+                net.neoforged.neoforge.transfer.ResourceHandler<net.neoforged.neoforge.transfer.fluid.FluidResource> handler;
+                if (i < 0) handler = tank.getFluidHandler();
+                else {
+                    BlockPos target = pos.offset(EXPERIENCE_OFFSETS.get(i));
+                    if (!level.hasChunkAt(target)) continue;
+                    handler = level.getCapability(net.neoforged.neoforge.capabilities.Capabilities.Fluid.BLOCK, target, null);
+                    if (handler == null && level.getBlockEntity(target) instanceof dev.dubhe.anvilcraft.api.fluid.IFluidResourceHandlerHolder holder) handler = holder.getFluidHandler();
+                }
+                if (handler == null || !seen.add(handler)) continue;
+                for (int slot = 0; slot < handler.size() && remaining > 0; slot++) {
+                    remaining -= handler.extract(slot, resource, remaining, transaction);
                 }
             }
-        }
-        for (BlockPos target : candidates) {
-            if (remaining <= 0) break;
-            var handler = level.getCapability(
-                net.neoforged.neoforge.capabilities.Capabilities.Fluid.BLOCK, target, null);
-            if (handler != null) {
-                remaining -= drainFluidHandler(handler, remaining);
-            }
-            // 兜底：只实现 IFluidResourceHandlerHolder、未注册 BLOCK 能力的方块（如创造流体储罐）
-            if (remaining > 0
-                && level.getBlockEntity(target)
-                    instanceof dev.dubhe.anvilcraft.api.fluid.IFluidResourceHandlerHolder holder
-                && holder.getFluidHandler() != null) {
-                remaining -= drainFluidHandler(holder.getFluidHandler(), remaining);
-            }
-        }
-        if (remaining > 0) {
-            TheNextForge.LOGGER.info("[TNF] automation rejected: network lacks {} mB experience fluid", remaining);
-            return false;
-        }
-        return true;
-    }
-
-    /**
-     * 从单个流体处理器抽取经验流体，返回实际抽到的毫桶数。
-     *
-     * <p>无限储罐（创造模式储罐等）在 SIMULATE 阶段就会返回足够量，因此天然兼容。
-     */
-    private static int drainExperience(FishTankBlockEntity tank, int amount) {
-        // 26.1.2：流体也走 Transfer API（见 FishTankFluids）
-        return FishTankFluids.extract(tank, amount);
-    }
-
-
-    /**
-     * 从任意 Transfer 流体 handler 抽经验流体（26.1.2 的邻接供能）。
-     */
-    private static int drainFluidHandler(
-        net.neoforged.neoforge.transfer.ResourceHandler<net.neoforged.neoforge.transfer.fluid.FluidResource> handler,
-        int amount
-    ) {
-        if (handler == null || amount <= 0) return 0;
-        var stack = new net.neoforged.neoforge.fluids.FluidStack(
-            dev.dubhe.anvilcraft.init.block.ModFluids.EXP_FLUID.get(), amount);
-        try (var tx = net.neoforged.neoforge.transfer.transaction.Transaction.openRoot()) {
-            int drained = handler.extract(0, net.neoforged.neoforge.transfer.fluid.FluidResource.of(stack), amount, tx);
-            tx.commit();
-            return drained;
+            if (remaining > 0) return false;
+            transaction.commit();
+            return true;
         }
     }
 }

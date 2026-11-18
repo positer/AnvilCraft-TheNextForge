@@ -7,7 +7,6 @@ import net.minecraft.gametest.framework.TestData;
 import net.minecraft.gametest.framework.TestEnvironmentDefinition;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.block.Rotation;
-import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.RegisterGameTestsEvent;
 
 import java.util.function.Consumer;
@@ -22,8 +21,15 @@ public final class TestRegistry {
     private TestRegistry() {
     }
 
-    @SubscribeEvent
+    // 注意：这里不加 @SubscribeEvent —— 它是被构造器用方法引用 addListener 挂上去的，
+    // 不是类级订阅。接线审计要求「每个 @SubscribeEvent 类都必须有订阅者」，加了它反而会被判为未接线。
     public static void onRegisterTests(RegisterGameTestsEvent event) {
+        // 客户端渲染探针加载普通隔离世界，不把仅 GameTest 使用的 Unit 测试实例同步给客户端。
+        if (Boolean.getBoolean("tnf.scaleProbe")) return;
+        if (Boolean.getBoolean("tnf.apiProbe")) {
+            register(event, "api_native_reload", ApiReloadProbe::nativeDatapackReload, 1200);
+            return;
+        }
         TheNextForge.LOGGER.info("[TNF] registering game tests");
         PortSmokeTests.registerAll(event);
     }
@@ -32,6 +38,10 @@ public final class TestRegistry {
     private static Holder<TestEnvironmentDefinition<?>> ENVIRONMENT;
 
     public static void register(RegisterGameTestsEvent event, String name, Consumer<GameTestHelper> body) {
+        register(event, name, body, 100);
+    }
+
+    public static void register(RegisterGameTestsEvent event, String name, Consumer<GameTestHelper> body, int timeout) {
         // 空环境：不额外设游戏规则/天气，等价于 1.21.1 的默认 GameTest 环境
         Holder<TestEnvironmentDefinition<?>> environment = event.registerEnvironment(
             Identifier.fromNamespaceAndPath(TheNextForge.MOD_ID, name + "_env"),
@@ -40,7 +50,7 @@ public final class TestRegistry {
         TestData<Holder<TestEnvironmentDefinition<?>>> data = new TestData<>(
             environment,
             Identifier.withDefaultNamespace("empty"),
-            100,
+            timeout,
             0,
             true,
             Rotation.NONE,

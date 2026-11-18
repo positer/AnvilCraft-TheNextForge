@@ -35,17 +35,17 @@ public final class EmbedCombat {
 
     /** 武器上的龙蛋：额外 25% 魔法伤害。 */
     public static float dragonWeaponBonus(ForgingData weapon) {
-        return weapon != null && weapon.hasEmbed("minecraft:dragon_egg") ? 0.25F : 0.0F;
+        return weapon != null && weapon.hasActiveEmbed("minecraft:dragon_egg") ? 0.25F : 0.0F;
     }
 
     /** 护符/装甲上的龙蛋：额外 10% 魔法伤害。 */
     public static float dragonArmourBonus(ForgingData armour) {
-        return armour != null && armour.hasEmbed("minecraft:dragon_egg") ? 0.10F : 0.0F;
+        return armour != null && armour.hasActiveEmbed("minecraft:dragon_egg") ? 0.10F : 0.0F;
     }
 
     /** 武器上的不死图腾：额外造成目标最大生命 5% 的魔法伤害。 */
     public static float totemMaxHealthBonus(ForgingData weapon, LivingEntity target) {
-        if (weapon == null || !weapon.hasEmbed("minecraft:totem_of_undying") || target == null) return 0.0F;
+        if (weapon == null || !weapon.hasActiveEmbed("minecraft:totem_of_undying") || target == null) return 0.0F;
         return target.getMaxHealth() * 0.05F;
     }
 
@@ -115,19 +115,32 @@ public final class EmbedCombat {
         return carries(player, "minecraft:dragon_egg");
     }
 
+    /** 玩家随身护符（背包里 *_amulet 的物品）上是否有该材料——护符专属效果用它，装甲不算。 */
+    public static boolean carriesAmulet(Player player, String material) {
+        if (player == null) return false;
+        for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
+            if (stack.isEmpty()) continue;
+            String path = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
+            if (!path.endsWith("_amulet")) continue;
+            ForgingData data = stack.get(dev.anvilcraft.thenextforge.init.ModDataComponents.FORGING.get());
+            if (data != null && data.hasActiveEmbed(material)) return true;
+        }
+        return false;
+    }
+
     /** 玩家是否携带（装甲或护符）带某材料嵌入的物品。 */
     public static boolean carries(Player player, String material) {
         if (player == null) return false;
         for (ItemStack stack : armourSlots(player)) {
             ForgingData data = stack.get(dev.anvilcraft.thenextforge.init.ModDataComponents.FORGING.get());
-            if (data != null && data.hasEmbed(material)) return true;
+            if (data != null && data.hasActiveEmbed(material)) return true;
         }
         for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
             if (stack.isEmpty()) continue;
             String path = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
             if (!path.endsWith("_amulet")) continue;
             ForgingData data = stack.get(dev.anvilcraft.thenextforge.init.ModDataComponents.FORGING.get());
-            if (data != null && data.hasEmbed(material)) return true;
+            if (data != null && data.hasActiveEmbed(material)) return true;
         }
         return false;
     }
@@ -139,7 +152,7 @@ public final class EmbedCombat {
      */
     public static boolean windBurst(LivingEntity target, ForgingData weapon) {
         if (target == null || weapon == null) return false;
-        if (!weapon.hasEmbed("minecraft:breeze_rod")) return false;
+        if (!weapon.hasActiveEmbed("minecraft:breeze_rod")) return false;
         if (target.level().isClientSide()) return false;
         Vec3 pos = target.position();
         target.level().explode(target, null, null, pos.x, pos.y + 0.5, pos.z, 1.5F, false,
@@ -155,7 +168,8 @@ public final class EmbedCombat {
      * @return 是否因此免死
      */
     public static boolean totemSaves(ServerLevel level, Player player, long now) {
-        if (player == null || !carries(player, "minecraft:totem_of_undying")) return false;
+        // 设计：致命伤害免死是**护符**一列的效果，装甲上嵌的不触发
+        if (player == null || !carriesAmulet(player, "minecraft:totem_of_undying")) return false;
         Long last = TOTEM_READY.get(player.getUUID());
         if (last != null && now - last < 240L * 20L) return false;
         TOTEM_READY.put(player.getUUID(), now);

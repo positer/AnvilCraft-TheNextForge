@@ -33,6 +33,8 @@ public enum ForgingMaterial {
      * 判定铁砧方块的材质，非铁砧返回 null。
      */
     public static ForgingMaterial ofAnvilBlock(BlockState state) {
+        var mapped = dev.anvilcraft.thenextforge.api.TnfApi.base(state);
+        if (mapped != null) return mapped.enabled() && mapped.line() == ForgingLine.ANVIL ? mapped.material() : null;
         return ofBlock(state, "_anvil", Blocks.ANVIL);
     }
 
@@ -40,6 +42,8 @@ public enum ForgingMaterial {
      * 判定砂轮方块的材质，非砂轮返回 null。
      */
     public static ForgingMaterial ofGrindstoneBlock(BlockState state) {
+        var mapped = dev.anvilcraft.thenextforge.api.TnfApi.base(state);
+        if (mapped != null) return mapped.enabled() && mapped.line() == ForgingLine.GRINDSTONE ? mapped.material() : null;
         return ofBlock(state, "_grindstone", Blocks.GRINDSTONE);
     }
 
@@ -66,21 +70,19 @@ public enum ForgingMaterial {
     }
 
     /**
-     * 判定铁砧锤的材质，非铁砧锤返回 null。
+     * 判定**手持**铁砧锤的材质，非铁砧锤返回 null。
+     *
+     * <p>只认铁砧锤的物品形态。铁砧物品本身**不能**手持当锤——那是自动化路径的行为：
+     * 落下的铁砧由 {@link #ofAnvilBlock} 判定并直接作用于台面，不经过这里。
      */
     public static ForgingMaterial ofHammer(ItemStack stack) {
-
+        var mapped = dev.anvilcraft.thenextforge.api.TnfApi.hammer(stack);
+        if (mapped != null) return mapped;
         if (stack.getItem() instanceof TranscendenceAnvilHammerItem) return TRANSCENDENCE;
         if (stack.getItem() instanceof RoyalAnvilHammerItem) return ROYAL;
         if (stack.getItem() instanceof FrostAnvilHammerItem) return FROST;
         if (stack.getItem() instanceof EmberAnvilHammerItem) return EMBER;
         if (stack.getItem() instanceof AnvilHammerItem) return BASE;
-        // 铁砧物品本身也可以当锤用
-        if (stack.is(net.minecraft.world.item.Items.ANVIL)
-            || stack.is(net.minecraft.world.item.Items.CHIPPED_ANVIL)
-            || stack.is(net.minecraft.world.item.Items.DAMAGED_ANVIL)) {
-            return BASE;
-        }
         return null;
     }
 

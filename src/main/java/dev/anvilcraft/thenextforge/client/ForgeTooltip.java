@@ -32,15 +32,15 @@ public final class ForgeTooltip {
     private static final Map<String, String[]> LABELS = new LinkedHashMap<>();
 
     static {
-        LABELS.put("weapon_attack", new String[]{"攻击力", "anvil"});
-        LABELS.put("tool_mining", new String[]{"挖掘速度", "anvil"});
-        LABELS.put("armor_value", new String[]{"护甲", "anvil"});
-        LABELS.put("armor_health", new String[]{"生命上限", "anvil"});
-        LABELS.put("weapon_cooldown", new String[]{"攻击冷却", "grindstone"});
-        LABELS.put("armor_speed", new String[]{"移速", "grindstone"});
-        LABELS.put("amulet_damage", new String[]{"伤害", "anvil"});
-        LABELS.put("weapon_reach", new String[]{"实体触及", "anvil"});
-        LABELS.put("weapon_sweep", new String[]{"横扫伤害", "grindstone"});
+        LABELS.put("weapon_attack", new String[]{"thenextforge.tooltip.stat.weapon_attack", "anvil"});
+        LABELS.put("tool_mining", new String[]{"thenextforge.tooltip.stat.tool_mining", "anvil"});
+        LABELS.put("armor_value", new String[]{"thenextforge.tooltip.stat.armor_value", "anvil"});
+        LABELS.put("armor_health", new String[]{"thenextforge.tooltip.stat.armor_health", "anvil"});
+        LABELS.put("weapon_cooldown", new String[]{"thenextforge.tooltip.stat.weapon_cooldown", "grindstone"});
+        LABELS.put("armor_speed", new String[]{"thenextforge.tooltip.stat.armor_speed", "grindstone"});
+        LABELS.put("amulet_damage", new String[]{"thenextforge.tooltip.stat.amulet_damage", "anvil"});
+        LABELS.put("weapon_reach", new String[]{"thenextforge.tooltip.stat.weapon_reach", "anvil"});
+        LABELS.put("weapon_sweep", new String[]{"thenextforge.tooltip.stat.weapon_sweep", "grindstone"});
     }
 
     private ForgeTooltip() {
@@ -50,23 +50,27 @@ public final class ForgeTooltip {
     private static void appendEmbeds(ItemTooltipEvent event, ForgingData data, ItemStack stack) {
         if (data.embeds().isEmpty()) return;
         boolean shift = net.minecraft.client.gui.screens.Screen.hasShiftDown();
-        event.getToolTip().add(Component.literal("嵌入材料").withStyle(ChatFormatting.DARK_GRAY));
+        event.getToolTip().add(Component.translatable("thenextforge.tooltip.embeddings").withStyle(ChatFormatting.DARK_GRAY));
         for (String id : data.embeds()) {
             var definition = dev.anvilcraft.thenextforge.forging.EmbedMaterials.byId(id);
-            if (definition == null) continue;
+            if (definition == null) {
+                String frozen = dev.anvilcraft.thenextforge.api.ManagedEmbeddings.describeAppliedLocalized(stack, id);
+                event.getToolTip().add(Component.literal("  " + id + (shift && !frozen.isBlank() ? "：" + frozen : "")).withStyle(ChatFormatting.GRAY));
+                continue;
+            }
             event.getToolTip().add(
-                Component.literal("  " + dev.anvilcraft.thenextforge.forging.EmbedMaterials.propertyOf(definition.label()))
+                Component.literal("  ").append(EmbedTooltipText.property(id, definition))
                     .withStyle(net.minecraft.network.chat.Style.EMPTY.withColor(definition.color()))
             );
             if (shift) {
                 event.getToolTip().add(
-                        Component.literal("    " + dev.anvilcraft.thenextforge.forging.EmbedMaterials.bonusTextFor(stack, id, data.anvilLevel()))
+                        Component.literal("    " + EmbedTooltipText.bonus(stack, id, data.anvilLevel()))
                         .withStyle(ChatFormatting.GRAY)
                 );
             }
         }
         if (!shift) {
-            event.getToolTip().add(Component.literal("按住 Shift 查看效果").withStyle(ChatFormatting.DARK_GRAY));
+            event.getToolTip().add(Component.translatable("thenextforge.tooltip.shift").withStyle(ChatFormatting.DARK_GRAY));
         }
     }
 
@@ -92,12 +96,12 @@ public final class ForgeTooltip {
         }
 
         tip.add(Component.empty());
-        tip.add(Component.literal("锻造").withStyle(ChatFormatting.GOLD));
+        tip.add(Component.translatable("thenextforge.tooltip.forging").withStyle(ChatFormatting.GOLD));
         if (data.anvilLevel() > 0) {
-            tip.add(line("铁砧 Lv." + data.anvilLevel(), anvil, flat));
+            tip.add(line(Component.translatable("thenextforge.tooltip.anvil", data.anvilLevel()).getString(), anvil, flat));
         }
         if (data.grindstoneLevel() > 0) {
-            tip.add(line("砂轮 Lv." + data.grindstoneLevel(), grindstone, flat));
+            tip.add(line(Component.translatable("thenextforge.tooltip.grindstone", data.grindstoneLevel()).getString(), grindstone, flat));
         }
     }
 
@@ -108,12 +112,14 @@ public final class ForgeTooltip {
      * 因此不会误删物品自身的原生属性行。
      */
     private static void stripForgeModifierLines(List<Component> tip, ItemStack stack) {
+        // 第三方属性格式化器会聚合原生属性；不按文本删除它的合计行。
+        if (net.neoforged.fml.ModList.get().isLoaded("apothic_attributes")) return;
         ItemAttributeModifiers modifiers = stack.getOrDefault(
             DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY
         );
         if (!modifiers.showInTooltip()) return;
         for (ItemAttributeModifiers.Entry entry : modifiers.modifiers()) {
-            if (!ForgingSummary.isForgeModifier(entry.modifier().id())) continue;
+            if (!ForgingSummary.isForgeModifier(entry.modifier().id()) || !LABELS.containsKey(ForgingSummary.keyOf(entry.modifier().id()))) continue;
             String text = vanillaLine(entry);
             for (int i = tip.size() - 1; i >= 0; i--) {
                 if (text.equals(tip.get(i).getString())) {
@@ -162,20 +168,20 @@ public final class ForgeTooltip {
     }
 
     private static String summarize(Map<String, Double> values, Map<String, Boolean> flat) {
-        if (values.isEmpty()) return "（无数值加成）";
+        if (values.isEmpty()) return Component.translatable("thenextforge.tooltip.none").getString();
         StringBuilder sb = new StringBuilder();
         for (Map.Entry<String, Double> e : values.entrySet()) {
-            if (sb.length() > 0) sb.append("、");
+            if (sb.length() > 0) sb.append(Component.translatable("thenextforge.tooltip.separator").getString());
             String[] label = LABELS.get(e.getKey());
-            sb.append(label == null ? e.getKey() : label[0]);
+            sb.append(label == null ? e.getKey() : Component.translatable(label[0]).getString());
             sb.append(Boolean.TRUE.equals(flat.get(e.getKey()))
-                ? String.format(" +%s", format(e.getValue()))
-                : String.format(" +%.1f%%", e.getValue() * 100.0));
+                ? String.format(java.util.Locale.ROOT, " +%s", format(e.getValue()))
+                : String.format(java.util.Locale.ROOT, " +%.1f%%", e.getValue() * 100.0));
         }
         return sb.toString();
     }
 
     private static String format(double value) {
-        return value == Math.rint(value) ? String.valueOf((long) value) : String.format("%.1f", value);
+        return value == Math.rint(value) ? String.valueOf((long) value) : String.format(java.util.Locale.ROOT, "%.1f", value);
     }
 }

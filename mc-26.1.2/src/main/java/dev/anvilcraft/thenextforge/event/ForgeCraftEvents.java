@@ -6,6 +6,7 @@ import dev.anvilcraft.thenextforge.init.ModDataComponents;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 
 /**
@@ -15,6 +16,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
  * <p>用 {@link PlayerEvent.ItemCraftedEvent} 而不是 mixin：原版 {@code ResultSlot#onTake}
  * 统一触发该事件，因此对所有实现模板升级的模组天然兼容，也不会碰到原版逻辑。
  */
+@EventBusSubscriber(modid = TheNextForge.MOD_ID)
 public final class ForgeCraftEvents {
     private ForgeCraftEvents() {
     }

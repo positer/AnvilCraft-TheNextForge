@@ -17,10 +17,16 @@ public final class ModRecipeOutcomes {
     public static final DeferredHolder<IRecipeOutcome.Type<?>, ForgeUpgradeOutcome.Type> FORGE_UPGRADE =
         OUTCOME_TYPES.register("forge_upgrade", ForgeUpgradeOutcome.Type::new);
 
+    public static final DeferredRegister<dev.anvilcraft.lib.v2.recipe.predicate.IRecipePredicate.Type<?>> PREDICATE_TYPES =
+        DeferredRegister.create(LibRegistries.PREDICATE_TYPE_REGISTRY, TheNextForge.MOD_ID);
+    public static final DeferredHolder<dev.anvilcraft.lib.v2.recipe.predicate.IRecipePredicate.Type<?>, ForgeBasePredicate.Type> FORGE_BASE =
+        PREDICATE_TYPES.register("forge_base", ForgeBasePredicate.Type::new);
+
     private ModRecipeOutcomes() {
     }
 
     public static void register(IEventBus modEventBus) {
         OUTCOME_TYPES.register(modEventBus);
+        PREDICATE_TYPES.register(modEventBus);
     }
 }

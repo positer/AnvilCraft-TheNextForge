@@ -30,6 +30,22 @@ public final class ForgingService {
     public record Result(boolean success, boolean destroyed, String message) {
     }
 
+    /** 猫护符的一次结算结果：额外等级与新的连续成功计数。 */
+    public record CatOutcome(int levelBonus, int streak) {
+    }
+
+    /**
+     * 猫护符：连续成功两次后，下一次成功额外 +1 级并重置计数。
+     *
+     * <p>设计强调「连续」——所以**失败必须断开计数**；原实现只在成功路径累加，
+     * 中间夹一次失败仍算连续，与设计不符。
+     */
+    public static CatOutcome catOutcome(boolean success, int streak) {
+        if (!success) return new CatOutcome(0, 0);
+        if (streak >= 2) return new CatOutcome(1, 0);
+        return new CatOutcome(0, streak + 1);
+    }
+
     private ForgingService() {
     }
 
@@ -48,55 +64,118 @@ public final class ForgingService {
         );
         if (display == null) return new Result(false, false, "这里没有可锻造的装备");
         ItemStack target = ForgeDisplay.stackOf(display).copy();
-        TargetKind kind = TargetKind.of(target);
-        if (kind == null) return new Result(false, false, "该物品不能锻造");
-        ForgingData data = target.getOrDefault(ModDataComponents.FORGING.get(), ForgingData.EMPTY);
-
         // 设计（新增）：砂轮上副手拿海绵芽锤击 → 不判定成功与否，消耗 1 个海绵芽，逆序取出最近嵌入的材料。
         // 取出与「能否砂轮升级」无关，所以放在砂轮限制之前。
         if (line == ForgingLine.GRINDSTONE && EmbedRemoval.isSpongeGemmule(player.getOffhandItem())) {
             return spongeRemove(player, level, pos, display, target);
         }
 
+        return settle(new StrikeAccess() {
+            public ItemStack material() { return player.getOffhandItem(); }
+            public RandomSource random() { return player.getRandom(); }
+            public boolean pay(int cost) {
+                if (player.isCreative()) return true;
+                if (player.totalExperience < cost) return false;
+                player.giveExperiencePoints(-cost);
+                return true;
+            }
+            public void refund(int xp) { player.giveExperiencePoints(xp); }
+            public boolean onFire() { return player.isOnFire(); }
+            public void rubyCost() { player.hurtServer(level, level.damageSources().magic(), 1.0F); }
+            public void save(ItemStack stack) { ForgeDisplay.setStack(display, stack); }
+            public void destroy() { display.discard(); }
+            public void message(Component message) {
+                ForgeFeedback.deliver(target.getHoverName(), message, player.isCreative(),
+                    value -> player.sendOverlayMessage(value), player::sendSystemMessage);
+            }
+        }, target, level, pos, line, baseMaterial, hammerMaterial);
+    }
+
+    /** 手动与自动仅提供输入/支付/输出；皇家、材质和护符规则只有一个结算入口。 */
+    public interface StrikeAccess {
+        ItemStack material();
+        RandomSource random();
+        boolean pay(int cost);
+        void refund(int xp);
+        boolean onFire();
+        void rubyCost();
+        void save(ItemStack stack);
+        void destroy();
+        void message(Component message);
+    }
+
+    public static Result settle(StrikeAccess access, ItemStack target, ServerLevel level, BlockPos pos,
+                                ForgingLine line, ForgingMaterial baseMaterial, ForgingMaterial hammerMaterial) {
+        TargetKind kind = TargetKind.of(target);
+        if (kind == null) {
+            String message = "无法锻造｜此物品不支持强化";
+            access.message(Component.literal(message));
+            return new Result(false, false, message);
+        }
+        ForgingData data = target.getOrDefault(ModDataComponents.FORGING.get(), ForgingData.EMPTY);
+
         // 设计 L23/L36：工具与护符不能用砂轮升级 —— 放置是允许的（便于海绵芽取出），锤击时才拒绝
-        if (line == ForgingLine.GRINDSTONE && !kind.canUseGrindstone()) {
-            String message = kind == TargetKind.TOOL ? "工具无法通过砂轮升级" : "护符无法通过砂轮升级";
+        if (!dev.anvilcraft.thenextforge.api.TnfApi.canUseLine(target, line)) {
+            String message = line == ForgingLine.ANVIL ? "该物品未开放铁砧升级" : kind == TargetKind.TOOL ? "工具无法通过砂轮升级" : "护符无法通过砂轮升级";
             TheNextForge.LOGGER.info("[TNF] grindstone refused {}: {}", kind, message);
-            player.sendOverlayMessage(Component.literal(message));
+            access.message(Component.literal(message));
             return new Result(false, false, message);
         }
 
         if (data.locked()) {
-            return new Result(false, false, "该物品已被黄玉封印，无法继续锤击");
+            String message = "无法锻造｜物品已被黄玉封印";
+            access.message(Component.literal(message));
+            return new Result(false, false, message);
         }
-        Set<String> amulets = Amulets.collect(level, pos);
+        try { dev.anvilcraft.thenextforge.api.TnfApi.validateUpgrades(target, line); }
+        catch (RuntimeException invalidRules) {
+            String message = "无法锻造｜附属升级配置不可用（未消耗经验）";
+            TheNextForge.LOGGER.error("[TNF] invalid upgrade configuration", invalidRules);
+            access.message(Component.literal(message));
+            return new Result(false, false, message);
+        }
+        var mappedBase = dev.anvilcraft.thenextforge.api.TnfApi.base(level.getBlockState(pos));
+        if (mappedBase != null && (!mappedBase.enabled() || mappedBase.line() != line)) mappedBase = null;
+        Amulets.Snapshot amuletSnapshot = Amulets.scan(level, pos);
+        Set<String> amulets = amuletSnapshot.effects();
         int currentLevel = data.level(line);
         int cost = ForgingRules.experienceCost(currentLevel);
         double frostFactor = 1.0;
         if (baseMaterial == ForgingMaterial.FROST) frostFactor *= 0.5;
         if (hammerMaterial == ForgingMaterial.FROST) frostFactor *= 0.5;
-        cost = Math.max(1, (int) Math.round(cost * frostFactor));
-        TheNextForge.LOGGER.info("[TNF] level={} cost={} totalXp={} amulets={}", currentLevel, cost, player.totalExperience, amulets);
-        if (!player.isCreative() && player.totalExperience < cost) {
-            level.playSound(null, pos, SoundEvents.VILLAGER_NO, SoundSource.PLAYERS, 0.8F, 1.0F);
-            String message = "经验不足，需要 " + cost + " 点经验";
-            player.sendOverlayMessage(Component.literal(message).withStyle(net.minecraft.ChatFormatting.RED));
+        cost = (int) Math.max(1L, Math.min(Integer.MAX_VALUE, Math.round(cost * frostFactor
+            * (mappedBase == null ? 1.0 : mappedBase.experienceMultiplier()))));
+        if (!access.pay(cost)) {
+            String message = "经验不足｜本次需要 " + cost + " 点经验（非经验等级）";
+            access.message(Component.literal(message).withStyle(net.minecraft.ChatFormatting.RED));
             return new Result(false, false, message);
         }
-        if (!player.isCreative()) player.giveExperiencePoints(-cost);
-        data = data.withXpSpent(data.xpSpent() + cost);
+        data = data.withXpSpent((int) Math.min(Integer.MAX_VALUE, (long) data.xpSpent() + cost));
 
-        RandomSource random = player.getRandom();
-        double rate = ForgingRules.successRate(currentLevel)
-            + Amulets.totalLevel(level, pos) * ForgingRules.AMULET_LEVEL_BONUS;
-        rate = Math.min(1.0, rate);
-        int amuletLevels = Amulets.totalLevel(level, pos);
+        ForgingRules.write(target, data);
+        access.save(target);
+
+        // 设计（用户裁定）：犰狳护符的「保护下一次锤击」在这一锤开始时就被消耗——
+        // 不论这一锤成功、失败还是无变化，保护都不再保留。
+        boolean protectedStrike = data.nextHitProtected();
+        if (protectedStrike) {
+            data = data.withNextHitProtected(false);
+            ForgingRules.write(target, data);
+            access.save(target);
+            TheNextForge.LOGGER.info("[TNF] armadillo next-strike protection consumed at strike start");
+        }
+        RandomSource random = access.random();
+        int amuletLevels = amuletSnapshot.totalLevel();
+        double rate = Math.min(1.0, ForgingRules.successRate(currentLevel)
+            + amuletLevels * ForgingRules.AMULET_LEVEL_BONUS
+            + (mappedBase == null ? 0 : mappedBase.successBonus()));
+        rate = Math.max(0, rate);
         if (amuletLevels > 0) {
             TheNextForge.LOGGER.info("[TNF] amulet levels contribute {} bonus, rate now {}", amuletLevels, rate);
         }
-        if (amulets.contains("ruby") && player.isOnFire()) {
+        if (amulets.contains("ruby") && access.onFire()) {
             rate = Math.min(1.0, rate + 0.10);
-            player.hurt(level.damageSources().magic(), 1.0F);
+            access.rubyCost();
         }
         String baseRoyalKey = "royal_base_" + line.name().toLowerCase();
         String hammerRoyalKey = "royal_hammer_" + line.name().toLowerCase();
@@ -118,27 +197,33 @@ public final class ForgingService {
 
         if (success) {
             int newLevel = currentLevel + 1;
-            StringBuilder text = new StringBuilder("锻造成功 Lv.");
-            int streak = data.catStreak();
+            java.util.List<String> upgrades = new java.util.ArrayList<>();
+            java.util.List<String> sources = new java.util.ArrayList<>();
+            String embedMessage = "";
+            if (mappedBase != null && mappedBase.extraLevels() > 0) {
+                newLevel += mappedBase.extraLevels();
+                sources.add("基底追加 +" + mappedBase.extraLevels() + " 级");
+            }
+            if (baseRoyal) sources.add("皇家基底必成");
+            else if (hammerRoyal) sources.add("皇家锤必成");
             if (amulets.contains("cat")) {
-                if (streak >= 2) {
-                    newLevel++;
-                    streak = 0;
-                    text.append("（猫护符追加一级）");
-                } else {
-                    streak++;
+                CatOutcome cat = catOutcome(true, data.catStreak());
+                if (cat.levelBonus() > 0) {
+                    newLevel += cat.levelBonus();
+                    sources.add("猫护符 +1 级");
                 }
-                data = data.withCatStreak(streak);
+                data = data.withCatStreak(cat.streak());
             }
             if (amulets.contains("sapphire") && consumeLava(level, pos)) {
                 newLevel++;
-                text.append("（蓝宝石追加一级）");
+                sources.add("蓝宝石护符 +1 级");
             }
             data = data.withLevel(line, newLevel);
             double multiplier = amulets.contains("anvil") ? 1.1 : 1.0;
-            String upgrade = ForgingRules.applyUpgrade(target, kind, line, newLevel, random, multiplier);
-            text.append(newLevel).append("（").append(quality(newLevel)).append("）");
-            if (upgrade != null) text.append(" ").append(upgrade);
+            for (int gained = currentLevel + 1; gained <= newLevel; gained++) {
+                String upgrade = applyRoleUpgrades(target, line, gained, random, multiplier);
+                if (upgrade != null && !upgrade.isBlank()) upgrades.add(upgrade);
+            }
 
             int extra = 0;
             if (baseMaterial == ForgingMaterial.EMBER && random.nextDouble() < 0.5) extra++;
@@ -146,68 +231,80 @@ public final class ForgingService {
             for (int i = 0; i < extra; i++) {
                 newLevel++;
                 data = data.withLevel(line, newLevel);
-                String extraUpgrade = ForgingRules.applyUpgrade(target, kind, line, newLevel, random, multiplier);
-                text.append(" 余烬 +1");
-                if (extraUpgrade != null) text.append("（").append(extraUpgrade).append("）");
+                String extraUpgrade = applyRoleUpgrades(target, line, newLevel, random, multiplier);
+                if (extraUpgrade != null && !extraUpgrade.isBlank()) upgrades.add(extraUpgrade);
             }
 
+            if (extra > 0) sources.add("余烬 +" + extra + " 级");
+
             if (line == ForgingLine.ANVIL) {
-                ItemStack offhand = player.getOffhandItem();
+                ItemStack offhand = access.material();
                 EmbedMaterials.Definition definition = EmbedMaterials.of(offhand);
                 boolean uniqueBlocked = definition != null && definition.unique() && data.hasEmbed(definition.id());
                 boolean allowed = definition != null && EmbedMaterials.allowsFor(definition, target);
                 if (definition != null && !allowed) {
-                    text.append(" 该材料不能嵌入此类对象");
+                    embedMessage = "未嵌入：材料不适用于此物品（未消耗）";
                 } else if (definition != null && uniqueBlocked) {
-                    text.append(" 这枚材料已经有了");
+                    embedMessage = "未嵌入：已有同种唯一材料（未消耗）";
                 } else if (definition != null
                     && data.embeds().size() >= EmbedMaterials.slotCount(kind, data)) {
                     // 槽位已满是**静默拒绝**过：玩家会以为材料不能用，所以必须给一句提示
-                    text.append(" 嵌入槽位已满（").append(data.embeds().size()).append(" / ")
-                        .append(EmbedMaterials.slotCount(kind, data)).append("）");
+                    embedMessage = "未嵌入：嵌入槽位已满（" + data.embeds().size() + "/"
+                        + EmbedMaterials.slotCount(kind, data) + "，材料未消耗）";
                 } else if (definition != null) {
-                    offhand.shrink(1);
-                    data = data.withEmbed(definition.id());
-                    EmbedMaterials.applyForRoles(target, definition, newLevel, level);
-                    text.append(" 嵌入 ").append(definition.label());
+                    try {
+                        ItemStack embedded = target.copy();
+                        EmbedMaterials.applyForRoles(embedded, definition, newLevel, level);
+                        dev.anvilcraft.thenextforge.api.TnfApi.copyComponents(target, embedded);
+                        offhand.shrink(1);
+                        data = data.withEmbed(definition.id());
+                    } catch (RuntimeException invalidEffect) {
+                        TheNextForge.LOGGER.error("[TNF] embed effect rejected {}", definition.id(), invalidEffect);
+                        embedMessage = "未嵌入：材料效果不可用（未消耗）";
+                    }
+                    if (embedMessage.isBlank()) embedMessage = "嵌入成功：" + definition.label() + "（槽位 " + data.embeds().size()
+                        + "/" + EmbedMaterials.slotCount(kind, data) + "）";
                 }
             }
 
-            applyRarity(target, newLevel);
+            ForgeQuality.renameOnUpgrade(target, data, random);
             ForgingRules.write(target, data);
-            ForgeDisplay.setStack(display, target);
+            access.save(target);
             if (!amulets.contains("silence")) {
                 int tierLevel = amulets.contains("abnormal") ? 4 + random.nextInt(7) : newLevel;
                 playSuccessEffect(level, pos, tierLevel);
             }
+            String text = ForgeFeedback.success(line, currentLevel, newLevel, cost, upgrades, sources, embedMessage);
             TheNextForge.LOGGER.info("[TNF] success: {}", text);
-            player.sendOverlayMessage(Component.literal(text.toString()));
+            access.message(Component.literal(text.toString()));
             return new Result(true, false, text.toString());
         }
 
+        // 失败即断开猫护符的「连续成功」（设计强调连续）
+        if (data.catStreak() != 0) {
+            data = data.withCatStreak(catOutcome(false, data.catStreak()).streak());
+            ForgingRules.write(target, data);
+            access.save(target);
+        }
         boolean baseSafe = baseMaterial.isSafe();
         boolean hammerSafe = hammerMaterial.isSafe();
         boolean overlimit = baseSafe || hammerSafe;
-        if (data.nextHitProtected()) {
-            data = data.withNextHitProtected(false);
-            ForgingRules.write(target, data);
-            ForgeDisplay.setStack(display, target);
-            String message = "损毁被 犰狳护符 的后续保护 抵挡，等级不变";
-            TheNextForge.LOGGER.info("[TNF] next-hit protection consumed");
-            player.sendOverlayMessage(Component.literal(message));
-            return new Result(false, false, message);
-        }
         double damageChance = amulets.contains("feather") ? 0.3 : 0.5;
         if (random.nextDouble() >= damageChance) {
-            String message = "升级失败，等级不变";
+            String message = "升级失败｜Lv." + currentLevel + " 不变";
             TheNextForge.LOGGER.info("[TNF] failure without damage, level stays {}", currentLevel);
             if (!amulets.contains("silence")) {
                 level.playSound(null, pos, SoundEvents.ANVIL_LAND, SoundSource.BLOCKS, 0.7F, 0.8F);
             }
-            player.sendOverlayMessage(Component.literal(message));
+            access.message(Component.literal(message));
             return new Result(false, false, message);
         }
 
+        if (protectedStrike) {
+            String message = "犰狳后续保护已生效｜Lv." + currentLevel + " 不变";
+            access.message(Component.literal(message));
+            return new Result(false, false, message);
+        }
         String protector = pickProtector(level, pos, amulets, data);
         if (protector != null) {
             data = data.withProtectionUsed(protector);
@@ -215,78 +312,85 @@ public final class ForgingService {
                 data = data.withNextHitProtected(true);
             }
             if ("emerald".equals(protector)) {
-                consumeVillager(level, pos, player);
+                consumeVillager(level, pos);
             }
             if (overlimit) {
-                String message = "损毁被 " + amuletName(protector) + " 抵挡，等级不变（超限保护降级）";
+                String message = amuletName(protector) + "已生效｜免于降级，Lv." + currentLevel + " 不变";
                 ForgingRules.write(target, data);
-                ForgeDisplay.setStack(display, target);
+                access.save(target);
                 TheNextForge.LOGGER.info("[TNF] damage blocked by {} (overlimit)", protector);
-                player.sendOverlayMessage(Component.literal(message));
+                access.message(Component.literal(message));
                 return new Result(false, false, message);
             }
-            String message = "损毁被 " + amuletName(protector) + " 抵挡";
+            String message = amuletName(protector) + "已生效｜免于损毁，Lv." + currentLevel + " 不变";
             ForgingRules.write(target, data);
-            ForgeDisplay.setStack(display, target);
+            access.save(target);
             TheNextForge.LOGGER.info("[TNF] damage blocked by {}", protector);
-            player.sendOverlayMessage(Component.literal(message));
+            access.message(Component.literal(message));
             return new Result(false, false, message);
         }
 
 
         ForgingRules.FailureOutcome outcome = ForgingRules.failureOutcome(
-            baseSafe, hammerSafe, data.hasEmbed(ForgingRules.TRANSCENDIUM_EMBED));
+            baseSafe, hammerSafe, data.hasActiveEmbed(ForgingRules.TRANSCENDIUM_EMBED));
         if (outcome == ForgingRules.FailureOutcome.RESET_TO_ZERO) {
             if (amulets.contains("dog")) {
-                int refund = ForgingRules.refundForDegrade(currentLevel, 0);
+                int refund = data.xpSpent() / 2;
                 if (refund > 0) {
-                    player.giveExperiencePoints(refund);
+                    access.refund(refund);
+                    data = data.withXpSpent(Math.max(0, data.xpSpent() - refund));
                     TheNextForge.LOGGER.info("[TNF] dog refunded {} xp on transcendium reset", refund);
                 }
             }
             data = ForgingRules.resetToZero(data, line);
             ForgingRules.write(target, data);
-            ForgeDisplay.setStack(display, target);
-            String message = "损毁被 超限合金粒 抵消，等级归 0";
+            access.save(target);
+            String message = "超限合金粒保住装备｜Lv." + currentLevel + " → 0";
             TheNextForge.LOGGER.info("[TNF] transcendium embed prevented destruction, reset to 0");
-            player.sendOverlayMessage(Component.literal(message));
+            access.message(Component.literal(message));
             return new Result(false, false, message);
         }
 
         if (outcome == ForgingRules.FailureOutcome.DESTROY && amulets.contains("topaz") && !data.protectionUsed("topaz")) {
             data = data.withProtectionUsed("topaz").withLocked();
             data = data.withLevel(line, currentLevel + 1);
+            applyRoleUpgrades(target, line, currentLevel + 1, random, amulets.contains("anvil") ? 1.1 : 1.0);
+            ForgeQuality.renameOnUpgrade(target, data, random);
             ForgingRules.write(target, data);
-            ForgeDisplay.setStack(display, target);
-            strikeLightning(level, pos);
-            String message = "损毁被 黄玉 抵挡，等级 +1，物品被封印";
+            access.save(target);
+            if (effectsEnabled(amulets)) strikeLightning(level, pos);
+            String message = "黄玉护符保住装备｜Lv." + currentLevel + " → " + (currentLevel + 1) + "｜已封印";
             TheNextForge.LOGGER.info("[TNF] topaz blocked damage, item locked");
-            player.sendOverlayMessage(Component.literal(message));
+            access.message(Component.literal(message));
             return new Result(false, false, message);
         }
 
 
         if (outcome == ForgingRules.FailureOutcome.DESTROY) {
-            display.discard();
+            access.destroy();
             if (amulets.contains("dog") && data.xpSpent() > 0) {
                 int refund = data.xpSpent() / 2;
-                player.giveExperiencePoints(refund);
+                access.refund(refund);
+                data = data.withXpSpent(Math.max(0, data.xpSpent() - refund));
                 TheNextForge.LOGGER.info("[TNF] dog amulet refunded {} xp", refund);
             }
-            level.playSound(null, pos, SoundEvents.ANVIL_BREAK, SoundSource.BLOCKS, 1.0F, 0.6F);
-            level.sendParticles(ParticleTypes.LARGE_SMOKE, pos.getX() + 0.5, pos.getY() + 1.2, pos.getZ() + 0.5,
-                24, 0.4, 0.3, 0.4, 0.02);
-            String message = "锻造失败，装备已损毁";
+            if (effectsEnabled(amulets)) {
+                level.playSound(null, pos, SoundEvents.ANVIL_BREAK, SoundSource.BLOCKS, 1.0F, 0.6F);
+                level.sendParticles(ParticleTypes.LARGE_SMOKE, pos.getX() + 0.5, pos.getY() + 1.2, pos.getZ() + 0.5,
+                    24, 0.4, 0.3, 0.4, 0.02);
+            }
+            String message = "锻造失败｜装备已损毁";
             TheNextForge.LOGGER.info("[TNF] destroyed");
-            player.sendOverlayMessage(Component.literal(message));
+            access.message(Component.literal(message));
             return new Result(false, true, message);
         }
 
         int newLevel = ForgingRules.degradedLevel(currentLevel, baseSafe, hammerSafe);
         if (amulets.contains("dog")) {
-            int refund = ForgingRules.refundForDegrade(currentLevel, newLevel);
+            int refund = data.xpSpent() / 2;
             if (refund > 0) {
-                player.giveExperiencePoints(refund);
+                access.refund(refund);
+                data = data.withXpSpent(Math.max(0, data.xpSpent() - refund));
                 TheNextForge.LOGGER.info("[TNF] dog refunded {} xp on overlimit degrade", refund);
             }
         }
@@ -295,19 +399,39 @@ public final class ForgingService {
             TheNextForge.LOGGER.info("[TNF] level reset to 0, royal token and protections unlocked");
         }
         ForgingRules.write(target, data);
-        ForgeDisplay.setStack(display, target);
-        level.playSound(null, pos, SoundEvents.ANVIL_LAND, SoundSource.BLOCKS, 1.0F, 0.6F);
-        String message = "锻造失败，等级降至 Lv." + newLevel;
+        access.save(target);
+        if (effectsEnabled(amulets)) {
+            level.playSound(null, pos, SoundEvents.ANVIL_LAND, SoundSource.BLOCKS, 1.0F, 0.6F);
+        }
+        String message = "锻造失败｜Lv." + currentLevel + " → " + newLevel + "（-" + (currentLevel - newLevel) + "）";
         TheNextForge.LOGGER.info("[TNF] degraded to {}", newLevel);
-        player.sendOverlayMessage(Component.literal(message));
+        access.message(Component.literal(message));
         return new Result(false, false, message);
+    }
+
+    private static String applyRoleUpgrades(ItemStack target, ForgingLine line, int newLevel,
+                                            RandomSource random, double multiplier) {
+        java.util.List<String> texts = new java.util.ArrayList<>();
+        for (TargetKind role : TargetKind.rolesOf(target)) {
+            if (line == ForgingLine.GRINDSTONE && !role.canUseGrindstone() && dev.anvilcraft.thenextforge.api.TnfApi.target(target) == null) continue;
+            String text = ForgingRules.applyUpgrade(target, role, line, newLevel, random, multiplier);
+            if (text != null && !texts.contains(text)) texts.add(text);
+        }
+        return String.join("；", texts);
     }
 
     /** 海绵芽取出：不判定成功与否、不降级，只把最近嵌入的材料还回去。 */
     private static Result spongeRemove(Player player, ServerLevel level, BlockPos pos,
                                        Display.ItemDisplay display, ItemStack target) {
         ItemStack sponge = player.getOffhandItem();
-        ItemStack removed = EmbedRemoval.removeLatest(target, level);
+        ItemStack removed;
+        try { removed = EmbedRemoval.removeLatest(target, level); }
+        catch (RuntimeException rejected) {
+            String message = "无法取出：材料撤销接口不可用，物品与海绵芽均保留";
+            TheNextForge.LOGGER.error("[TNF] embed removal rejected", rejected);
+            player.sendOverlayMessage(Component.literal(message));
+            return new Result(false, false, message);
+        }
         if (removed.isEmpty()) {
             String message = "没有可取的嵌入材料";
             TheNextForge.LOGGER.info("[TNF] sponge gemmule: nothing to remove");
@@ -324,9 +448,14 @@ public final class ForgingService {
         return new Result(true, false, message);
     }
 
-    private static String pickProtector(ServerLevel level, BlockPos pos, Set<String> amulets, ForgingData data) {
+    /**
+     * 损毁抵挡的候选：设计次序 犰狳 ＞ 绿宝石（黄玉在 DESTROY 分支里单独处理）。
+     *
+     * <p>公开给 GameTest 直接断言次序，不必掷随机。
+     */
+    public static String pickProtector(ServerLevel level, BlockPos pos, Set<String> amulets, ForgingData data) {
         if (amulets.contains("armadillo") && !data.protectionUsed("armadillo")) return "armadillo";
-        if (amulets.contains("emerald") && !data.protectionUsed("emerald") && hasVillager(level, pos)) return "emerald";
+        if (amulets.contains("emerald") && !data.protectionUsed("emerald") && hasVillagerNear(level, pos)) return "emerald";
         return null;
     }
 
@@ -339,12 +468,25 @@ public final class ForgingService {
         };
     }
 
-    private static boolean hasVillager(ServerLevel level, BlockPos pos) {
-        return !level.getEntitiesOfClass(Villager.class, new net.minecraft.world.phys.AABB(pos).inflate(1.5)).isEmpty();
+    /**
+     * 设计：绿宝石护符要求「基底周围 3*3 有村民」。
+     *
+     * <p>用 {@code inflate(1.0)} 得到一个以基底为中心的 3×3×3 判定盒；
+     * 原实现是 {@code inflate(1.5)}（4×4×4），比设计大一圈。
+     */
+    public static boolean hasVillagerNear(ServerLevel level, BlockPos pos) {
+        return !level.getEntitiesOfClass(Villager.class, villagerBox(pos)).isEmpty();
     }
 
-    private static void consumeVillager(ServerLevel level, BlockPos pos, Player player) {
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, new net.minecraft.world.phys.AABB(pos).inflate(1.5));
+    /** 绿宝石护符的村民判定盒（3×3×3，以基底为中心）。 */
+    public static net.minecraft.world.phys.AABB villagerBox(BlockPos pos) {
+        return new net.minecraft.world.phys.AABB(
+            pos.getX() - 1, pos.getY() - 1, pos.getZ() - 1,
+            pos.getX() + 2, pos.getY() + 2, pos.getZ() + 2);
+    }
+
+    private static void consumeVillager(ServerLevel level, BlockPos pos) {
+        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, villagerBox(pos));
         if (villagers.isEmpty()) return;
         Villager villager = villagers.getFirst();
         // 26.1.2 的 VillagerData 是 record：升级用 withLevel(...)，读级用 level()
@@ -362,17 +504,30 @@ public final class ForgingService {
     }
 
 
-    private static boolean consumeLava(ServerLevel level, BlockPos pos) {
+    /**
+     * 蓝宝石护符：基底周围 3×1×3 有岩浆源时，随机把其中一块换成黑曜石。
+     *
+     * @return 是否真的消耗了一块岩浆源（决定要不要额外 +1 级）
+     */
+    public static boolean consumeLava(ServerLevel level, BlockPos pos) {
+        List<BlockPos> lava = new java.util.ArrayList<>();
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 BlockPos check = pos.offset(dx, 0, dz);
-                if (level.getBlockState(check).is(Blocks.LAVA)) {
-                    level.setBlockAndUpdate(check, Blocks.OBSIDIAN.defaultBlockState());
-                    return true;
-                }
+                if (level.getBlockState(check).is(Blocks.LAVA)
+                    && level.getFluidState(check).isSource()) lava.add(check);
             }
         }
-        return false;
+        if (lava.isEmpty()) return false;
+        BlockPos picked = lava.get(level.getRandom().nextInt(lava.size()));
+        level.setBlockAndUpdate(picked, Blocks.OBSIDIAN.defaultBlockState());
+        TheNextForge.LOGGER.info("[TNF] sapphire amulet consumed lava at {}", picked);
+        return true;
+    }
+
+    /** 设计：寂静护符屏蔽升级/失败/无变化的所有特效与声音，只保留文字。 */
+    public static boolean effectsEnabled(java.util.Set<String> amulets) {
+        return amulets == null || !amulets.contains("silence");
     }
 
     private static void strikeLightning(ServerLevel level, BlockPos pos) {
@@ -382,24 +537,11 @@ public final class ForgingService {
         level.addFreshEntity(bolt);
     }
 
-    private static void applyRarity(ItemStack stack, int level) {
-        net.minecraft.world.item.Rarity rarity = switch (quality(level)) {
-            case "传说" -> net.minecraft.world.item.Rarity.EPIC;
-            case "稀有" -> net.minecraft.world.item.Rarity.RARE;
-            case "优秀" -> net.minecraft.world.item.Rarity.UNCOMMON;
-            default -> net.minecraft.world.item.Rarity.COMMON;
-        };
-        stack.set(net.minecraft.core.component.DataComponents.RARITY, rarity);
-        if (level >= 7) {
-            stack.set(net.minecraft.core.component.DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
-        }
-    }
-
     /**
      * 成功时按强化等级播放分级特效：等级越高，粒子越多、音效层次越丰富。
      */
     public static void playSuccessEffect(ServerLevel serverLevel, BlockPos pos, int level) {
-        int tier = level >= 10 ? 3 : level >= 7 ? 2 : level >= 4 ? 1 : 0;
+        int tier = ForgeQuality.tier(level);
         double x = pos.getX() + 0.5;
         double y = pos.getY() + 1.15;
         double z = pos.getZ() + 0.5;

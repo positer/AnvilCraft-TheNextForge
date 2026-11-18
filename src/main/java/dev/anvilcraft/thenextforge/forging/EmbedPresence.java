@@ -45,17 +45,18 @@ public final class EmbedPresence {
     /** 背包（含护符）里是否有该材料——护符走这条。 */
     public static boolean carried(Player player, String material) {
         for (ItemStack stack : player.getInventory().items) {
-            if (hasEmbed(stack, material)) return true;
+            if (TargetKind.of(stack) == TargetKind.AMULET && hasEmbed(stack, material)) return true;
         }
         for (ItemStack stack : player.getInventory().armor) {
             if (hasEmbed(stack, material)) return true;
         }
-        return hasEmbed(player.getOffhandItem(), material);
+        return TargetKind.of(player.getOffhandItem()) == TargetKind.AMULET
+            && hasEmbed(player.getOffhandItem(), material);
     }
 
     private static boolean hasEmbed(ItemStack stack, String material) {
         if (stack == null || stack.isEmpty()) return false;
         ForgingData data = stack.get(ModDataComponents.FORGING.get());
-        return data != null && data.hasEmbed(material);
+        return data != null && data.hasActiveEmbed(material);
     }
 }

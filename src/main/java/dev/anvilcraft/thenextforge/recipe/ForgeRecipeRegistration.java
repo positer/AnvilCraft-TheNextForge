@@ -47,8 +47,8 @@ public final class ForgeRecipeRegistration {
         var tankPredicate = HasBlock.builder().below().of(fishTank).build();
         // 基底：砧标签 或 砂轮（砂轮不在砧标签里，之前只注册了砧，砂轮上方的鱼缸根本没人接管，
         // 于是鱼缸继续按自己的配方把经验流体做成经验颗粒）
-        var anvilBase = HasBlock.builder().below(2).of(BlockTags.ANVIL).build();
-        var grindstoneBase = HasBlock.builder().below(2).of(grindstoneBlocks()).build();
+        var anvilBase = new ForgeBasePredicate(dev.anvilcraft.thenextforge.forging.ForgingLine.ANVIL);
+        var grindstoneBase = new ForgeBasePredicate(dev.anvilcraft.thenextforge.forging.ForgingLine.GRINDSTONE);
         recipes.add(new RecipeHolder<>(
             ResourceLocation.fromNamespaceAndPath(TheNextForge.MOD_ID, "forge_upgrade"),
             new ForgeUpgradeRecipe(

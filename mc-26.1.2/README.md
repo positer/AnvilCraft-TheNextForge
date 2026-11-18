@@ -10,8 +10,9 @@
 | Minecraft | 26.1.2 |
 | NeoForge | 26.1.2.114 |
 | Java | 25 |
-| AnvilLib | 2.0.0+snapshot.563（含 `anvillib-config`、`anvillib-recipe`） |
-| Ageratum | 0.0.1+build.128 |
+| AnvilCraft | 1.6.0+snapshot.2749 |
+| AnvilLib | 2.0.0+snapshot.601（含 `anvillib-config`、`anvillib-recipe`） |
+| Ageratum | 0.0.1+build.130 |
 | JEI | 29.43.0.106（compileOnly + runtimeOnly） |
 
 ## 快速开始
@@ -23,7 +24,7 @@ cd AnvilCraft-TheNextForge/mc-26.1.2
 .\gradlew.bat build               # 产出 build/libs/thenextforge-neoforge-0.1.0.jar
 ```
 
-## 当前状态（2026-11-04）
+## 历史状态（2026-11-04）
 
 | 项 | 状态 |
 |---|---|
@@ -81,6 +82,8 @@ src/main/resources/
 | 实验性放大 | 已实现（第一人称 + 砧上展示实体），**观感未实机验证** |
 
 ## 文档
+
+- [2026-11-08 两代对齐与性能报告](../docs/design/07-generation-alignment-performance.md) —— 当前规则修正、合同测试与性能验证边界；实机清单仍独立验收。
 
 - [PORTING.md](PORTING.md) —— API 变更表、踩坑记录、已知差异
 - [ACCEPTANCE.md](ACCEPTANCE.md) —— **实机验收清单**（需要进游戏确认的部分）

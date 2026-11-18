@@ -544,12 +544,14 @@ public final class ForgingGameTests {
         var emerald = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.EMERALD));
         dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(amulet, emerald, TargetKind.AMULET, 1, helper.getLevel());
         amulet.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:emerald"));
-        // 设计：护符必须挂在铁砧/砂轮侧面的展示框里才提供加成
+        // 历史展示框夹具保留；嵌入属性按背包携带生效
         helper.setBlock(2, 1, 2, Blocks.ANVIL);
         var base = helper.absolutePos(new net.minecraft.core.BlockPos(2, 1, 2));
         var frame = new net.minecraft.world.entity.decoration.ItemFrame(helper.getLevel(),
             base.south(), net.minecraft.core.Direction.SOUTH);
         frame.setItem(amulet);
+        // 当前设计：展示框管锻造；玩家属性由携带护符提供。
+        player.getInventory().setItem(1, amulet.copy());
         helper.getLevel().addFreshEntity(frame);
         player.setPos(base.getX() + 0.5, base.getY(), base.getZ() + 0.5);
 
@@ -907,14 +909,16 @@ public final class ForgingGameTests {
             "护符+红石 = 急迫 I");
         helper.assertTrue(hasEffect(amuletRedstone, net.minecraft.world.effect.MobEffects.SPEED, 0),
             "护符+红石 = 速度 I");
-        helper.assertTrue(hasEffect(dev.anvilcraft.thenextforge.event.ForgeItemTicker.amuletEffects(
-            withEmbeds(EMBED_AMULET, "minecraft:heart_of_the_sea")),
-            net.minecraft.world.effect.MobEffects.CONDUIT_POWER, 0), "护符+海洋之心 = 海洋庇佑");
+        // 海洋之心：潮涌改为「在水中」才生效（设计），不再无条件挂在护符效果上
+        helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeItemTicker.grantsConduitPower(true, false, true),
+            "在水中 + 护符海洋之心 = 海洋庇佑");
+        helper.assertTrue(!dev.anvilcraft.thenextforge.event.ForgeItemTicker.grantsConduitPower(false, true, true),
+            "出水后不应再有海洋庇佑");
         helper.assertTrue(hasEffect(dev.anvilcraft.thenextforge.event.ForgeItemTicker.amuletEffects(
             withEmbeds(EMBED_AMULET, "minecraft:nether_star")),
             net.minecraft.world.effect.MobEffects.RESISTANCE, 2), "护符+下界之星 = 抗性 III");
         helper.assertTrue(hasEffect(dev.anvilcraft.thenextforge.event.ForgeItemTicker.amuletEffects(
-            withEmbeds(EMBED_AMULET, "anvilcraft:netherite_ingot")),
+            withEmbeds(EMBED_AMULET, "minecraft:netherite_ingot")),
             net.minecraft.world.effect.MobEffects.RESISTANCE, 0), "护符+下界合金锭 = 抗性 I");
         helper.assertTrue(hasEffect(dev.anvilcraft.thenextforge.event.ForgeItemTicker.amuletEffects(
             withEmbeds(EMBED_AMULET, "anvilcraft:neutronium_ingot")),
@@ -1415,12 +1419,14 @@ public final class ForgingGameTests {
         var emerald = dev.anvilcraft.thenextforge.forging.EmbedMaterials.of(new ItemStack(Items.EMERALD));
         dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(amulet, emerald, TargetKind.AMULET, 1, helper.getLevel());
         amulet.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:emerald"));
-        // 设计：护符只在其挂在铁砧/砂轮侧面的展示框中时提供加成
+        // 历史展示框夹具保留；嵌入属性按背包携带生效
         helper.setBlock(2, 1, 2, Blocks.ANVIL);
         var framePos = helper.absolutePos(new net.minecraft.core.BlockPos(2, 1, 3));
         var frame = new net.minecraft.world.entity.decoration.ItemFrame(helper.getLevel(), framePos,
             net.minecraft.core.Direction.SOUTH);
         frame.setItem(amulet);
+        // 当前设计：展示框管锻造；玩家属性由携带护符提供。
+        player.getInventory().setItem(1, amulet.copy());
         helper.getLevel().addFreshEntity(frame);
         player.setPos(helper.absolutePos(new net.minecraft.core.BlockPos(2, 1, 2)).getX() + 0.5,
             helper.absolutePos(new net.minecraft.core.BlockPos(2, 1, 2)).getY(),
@@ -1445,7 +1451,11 @@ public final class ForgingGameTests {
 
         sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:slime_ball"));
         dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, zombie, sword, 2.0F);
-        helper.assertTrue(zombie.hasEffect(net.minecraft.world.effect.MobEffects.SLOWNESS), "slime ball should slow");
+        var zombieSpeed = zombie.getAttribute(Attributes.MOVEMENT_SPEED);
+        var zombieSlow = zombieSpeed == null ? null
+            : zombieSpeed.getModifier(dev.anvilcraft.thenextforge.forging.CombatEffects.SLIME_SLOW_ID);
+        helper.assertTrue(zombieSlow != null && near(zombieSlow.amount(), -0.5D),
+            "slime ball 应精确降低 50% 移速，实际 " + (zombieSlow == null ? "无修饰符" : zombieSlow.amount()));
 
         sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("anvilcraft:negative_matter_nugget"));
         dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, zombie, sword, 2.0F);
@@ -1463,10 +1473,14 @@ public final class ForgingGameTests {
         dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, zombie, sword, 2.0F);
         helper.assertTrue(zombie.hasEffect(net.minecraft.world.effect.MobEffects.GLOWING), "glow ink should glow");
 
+        // 原来这里断言的是「x 变了 或者 z != 0」——僵尸本来就不在 z=0，第二个条件恒真，
+        // 所以 ender_eye 键写错（武器传送根本没生效）时这条测试照样通过。改成量真实位移。
         double beforeX = zombie.getX();
+        double beforeZ = zombie.getZ();
         sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:ender_pearl"));
         dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, zombie, sword, 2.0F);
-        helper.assertTrue(zombie.getX() != beforeX || zombie.getZ() != 0, "ender eye should teleport");
+        double moved = Math.abs(zombie.getX() - beforeX) + Math.abs(zombie.getZ() - beforeZ);
+        helper.assertTrue(moved > 1.0, "末影珍珠武器嵌入应让目标随机传送，实际位移 " + moved);
         helper.succeed();
         });
         TestRegistry.register(registerEvent, "drop_effects_smelt_and_collect", helper -> {
@@ -2142,7 +2156,9 @@ public final class ForgingGameTests {
         helper.succeed();
         });
         TestRegistry.register(registerEvent, "automated_upgrade_works_for_every_kind", helper -> {
-        helper.setBlock(1, 1, 1, net.minecraft.world.level.block.Blocks.ANVIL);
+        // 对象适用性测试不掷概率：每件新对象使用皇家基底的首次必成。
+        var royalAnvil = BuiltInRegistries.BLOCK.getOptional(Identifier.fromNamespaceAndPath("anvilcraft", "royal_anvil")).orElseThrow();
+        helper.setBlock(1, 1, 1, royalAnvil);
         var fishTank = net.minecraft.core.registries.BuiltInRegistries.BLOCK
             .getOptional(net.minecraft.resources.Identifier.fromNamespaceAndPath("anvilcraft", "fish_tank"))
             .orElse(null);
@@ -2163,8 +2179,10 @@ public final class ForgingGameTests {
             itemById("anvilcraft:armadillo_amulet"),
         };
         int upgraded = 0;
+        // 固定种子：这条测试以前用 level.getRandom()，运气不好就整轮红（2026-11-05 实测两次）
+        var fixedRandom = net.minecraft.util.RandomSource.create(20261105L);
         for (ItemStack target : targets) {
-            if (target.isEmpty()) continue;
+            helper.assertTrue(!target.isEmpty(), "所有待测对象都必须解析成功");
             dev.anvilcraft.thenextforge.event.FishTankFluids.drainAll(tank);
             dev.anvilcraft.thenextforge.event.FishTankFluids.insert(tank, new net.neoforged.neoforge.fluids.FluidStack(dev.dubhe.anvilcraft.init.block.ModFluids.EXP_FLUID.get(), 1000
                 ));
@@ -2183,7 +2201,8 @@ public final class ForgingGameTests {
                         ));
                 }
                 dev.anvilcraft.thenextforge.event.AutomationHandler.applyAutomatedHit(
-                    helper.getLevel(), tankPos, net.minecraft.world.level.block.Blocks.ANVIL.defaultBlockState()
+                    helper.getLevel(), tankPos, royalAnvil.defaultBlockState(),
+                    fixedRandom
                 );
                 ItemStack after = dev.anvilcraft.thenextforge.event.FishTankSlots.get(tank, 8);
                 if (after.isEmpty()) break;
@@ -2195,7 +2214,7 @@ public final class ForgingGameTests {
                 }
             }
         }
-        helper.assertTrue(upgraded >= 3, "automation should upgrade most kinds, got " + upgraded);
+        helper.assertTrue(upgraded == targets.length, "皇家必成应覆盖全部对象，实际 " + upgraded + "/" + targets.length);
         helper.succeed();
         });
         TestRegistry.register(registerEvent, "grindstone_base_is_covered_by_the_recipe", helper -> {
@@ -2299,12 +2318,13 @@ public final class ForgingGameTests {
         TestRegistry.register(registerEvent, "embed_attribute_matrix_matches_design", helper -> {
         var mul = net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADD_MULTIPLIED_BASE;
         var add = net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADD_VALUE;
+        var total = net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL;
 
         // 石英：伤害 +20%（武器/护符）
         expectEmbedAmount(helper, "minecraft:quartz", TargetKind.WEAPON, Attributes.ATTACK_DAMAGE, mul, 0.20);
         expectEmbedAmount(helper, "minecraft:quartz", TargetKind.AMULET, Attributes.ATTACK_DAMAGE, mul, 0.20);
-        // 红石：武器冷却 -20%（实现为攻速 +20%）
-        expectEmbedAmount(helper, "minecraft:redstone", TargetKind.WEAPON, Attributes.ATTACK_SPEED, mul, 0.20);
+        // 红石：武器冷却 -20% ⇒ 攻速 ×1.25（冷却 = 1/攻速；2026-11-05 按设计改成落在最终值上）
+        expectEmbedAmount(helper, "minecraft:redstone", TargetKind.WEAPON, Attributes.ATTACK_SPEED, total, 0.25);
         // 铁锭：方块触及 +1（工具/护符），实体触及 +1（武器/护符）
         expectEmbedAmount(helper, "minecraft:iron_ingot", TargetKind.TOOL, Attributes.BLOCK_INTERACTION_RANGE, add, 1.0);
         expectEmbedAmount(helper, "minecraft:iron_ingot", TargetKind.WEAPON, Attributes.ENTITY_INTERACTION_RANGE, add, 1.0);
@@ -2335,7 +2355,8 @@ public final class ForgingGameTests {
         expectEmbedAmount(helper, "anvilcraft:royal_steel_ingot", TargetKind.AMULET, Attributes.ARMOR, add, 1.0);
         // 中子锭：造成伤害 +80%、武器冷却 +30%（武器）；护甲 +2（装甲/护符）
         expectEmbedAmount(helper, "anvilcraft:neutronium_ingot", TargetKind.WEAPON, Attributes.ATTACK_DAMAGE, mul, 0.80);
-        expectEmbedAmount(helper, "anvilcraft:neutronium_ingot", TargetKind.WEAPON, Attributes.ATTACK_SPEED, mul, -0.30);
+        expectEmbedAmount(helper, "anvilcraft:neutronium_ingot", TargetKind.WEAPON, Attributes.ATTACK_SPEED, total,
+            -(1.0D - 1.0D / 1.3D));
         expectEmbedAmount(helper, "anvilcraft:neutronium_ingot", TargetKind.ARMOR, Attributes.ARMOR, add, 2.0);
         expectEmbedAmount(helper, "anvilcraft:neutronium_ingot", TargetKind.AMULET, Attributes.ARMOR, add, 2.0);
         helper.succeed();
@@ -2681,6 +2702,410 @@ public final class ForgingGameTests {
         helper.assertTrue(checked >= 40, "至少要覆盖 40 个（材料, 类别）组合，实际 " + checked);
         TheNextForge.LOGGER.info("[TNF-ROUNDTRIP] checked {} material/kind pairs", checked);
         helper.succeed();
+        });
+        TestRegistry.register(registerEvent, "embed_catalysts_all_resolve_to_supported_workstations", helper -> {
+            var stacks = dev.anvilcraft.thenextforge.client.EmbedCatalysts.stacks();
+            helper.assertTrue(stacks.size() >= 15, "催化剂至少 15 个，实际 " + stacks.size());
+            int anvils = 0;
+            int grindstones = 0;
+            int hammers = 0;
+            for (ItemStack stack : stacks) {
+                // 顺序有意义：原版铁砧物品本身也能当锤用，所以先按**方块**归类，
+                // 只有不是方块时才落到锤的分支。
+                net.minecraft.world.level.block.Block block = net.minecraft.world.level.block.Block.byItem(stack.getItem());
+                if (block != net.minecraft.world.level.block.Blocks.AIR) {
+                    var state = block.defaultBlockState();
+                    if (ForgingMaterial.ofAnvilBlock(state) != null) {
+                        anvils++;
+                    } else if (ForgingMaterial.ofGrindstoneBlock(state) != null) {
+                        grindstones++;
+                    } else {
+                        helper.fail("方块型催化剂不被 ForgingMaterial 识别：" + stack, BlockPos.ZERO);
+                    }
+                } else if (ForgingMaterial.ofHammer(stack) != null) {
+                    hammers++;
+                } else {
+                    helper.fail("催化剂既不是方块也不是铁砧锤：" + stack, BlockPos.ZERO);
+                }
+            }
+            helper.assertTrue(anvils >= 5, "铁砧至少 5 个（原版 + 四档），实际 " + anvils);
+            helper.assertTrue(grindstones >= 5, "砂轮至少 5 个（原版 + 四档），实际 " + grindstones);
+            helper.assertTrue(hammers >= 5, "铁砧锤至少 5 把，实际 " + hammers);
+            TheNextForge.LOGGER.info("[TNF-CATALYSTS] anvils={} grindstones={} hammers={}", anvils, grindstones, hammers);
+            helper.succeed();
+        });
+        TestRegistry.register(registerEvent, "anvil_item_is_not_a_hand_held_hammer", helper -> {
+            helper.assertTrue(ForgingMaterial.ofHammer(new ItemStack(Items.ANVIL)) == null,
+                "手持铁砧不应被当成锤");
+            helper.assertTrue(ForgingMaterial.ofHammer(new ItemStack(Items.CHIPPED_ANVIL)) == null,
+                "手持开裂的铁砧不应被当成锤");
+            helper.assertTrue(ForgingMaterial.ofHammer(new ItemStack(Items.DAMAGED_ANVIL)) == null,
+                "手持严重破损的铁砧不应被当成锤");
+            helper.assertTrue(
+                ForgingMaterial.ofAnvilBlock(net.minecraft.world.level.block.Blocks.ANVIL.defaultBlockState())
+                    == ForgingMaterial.BASE,
+                "落下的铁砧仍应作为 BASE 档锤");
+            helper.succeed();
+        });
+        // 接线回归（2026-11-04 实测故障）：ForgeRecipeRegistration 没挂上事件总线时，
+        // 落砧配方根本不进世界内配方管理器，鱼缸会退回铁砧工艺自带的经验颗粒配方。
+        TestRegistry.register(registerEvent, "forge_upgrade_recipe_takes_over_anvil_fall", helper -> {
+            var manager = helper.getLevel().recipeAccess().anvillib$getInWorldRecipeManager();
+            helper.assertTrue(manager != null, "世界内配方管理器未初始化（AnvilLib 的 ServerStartedEvent 监听没跑）");
+            var trigger = dev.dubhe.anvilcraft.init.recipe.ModRecipeTriggers.ON_ANVIL_FALL_ON.get();
+            var ordered = new java.util.ArrayList<>(manager.recipeHolders.get(trigger));
+            helper.assertTrue(!ordered.isEmpty(), "落砧触发器下没有任何配方");
+            var first = ordered.getFirst().id().identifier().toString();
+            helper.assertTrue(first.startsWith("thenextforge:forge_upgrade"),
+                "落砧触发器里第一条（先执行）必须是自动锤配方，实际是 " + first
+                    + "；全部=" + ordered.stream().map(h -> h.id().identifier().toString()).toList());
+            helper.succeed();
+        });
+        // 接线回归：ForgeEvents 没挂上总线时，右键铁砧放不上任何对象（2026-11-04 实测故障）。
+        TestRegistry.register(registerEvent, "right_click_places_target_on_anvil", helper -> {
+            helper.setBlock(1, 1, 1, Blocks.ANVIL);
+            BlockPos pos = helper.absolutePos(new BlockPos(1, 1, 1));
+            // 必须是 ServerPlayer：ForgeEvents 的服务端分支按真实服务端玩家处理
+            var player = net.neoforged.neoforge.common.util.FakePlayerFactory.getMinecraft(helper.getLevel());
+            player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, new ItemStack(Items.DIAMOND_SWORD));
+            var hit = new net.minecraft.world.phys.BlockHitResult(
+                net.minecraft.world.phys.Vec3.atCenterOf(pos), net.minecraft.core.Direction.UP, pos, false);
+            var event = new net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickBlock(
+                player, net.minecraft.world.InteractionHand.MAIN_HAND, pos, hit);
+            net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(event);
+            helper.assertTrue(event.isCanceled(), "右键铁砧必须被 ForgeEvents 取消，否则原版会接管这次点击");
+            helper.assertTrue(ForgeDisplay.find(helper.getLevel(), pos) != null, "必须生成展示实体");
+            helper.assertTrue(player.getMainHandItem().isEmpty(), "放置后手上不能还留着那把剑");
+            helper.succeed();
+        });
+        // 描述矩阵：每种材料的每个可嵌入对象都必须有自己的说明文本，不能落到「材料名本身」那个兜底分支。
+        // 2026-11-05 的 ender_pearl 就是 bonusText 的键写成了 ender_eye，tooltip 只剩材料名。
+        TestRegistry.register(registerEvent, "every_embed_material_has_specific_description", helper -> {
+            java.util.List<String> missing = new java.util.ArrayList<>();
+            for (var entry : dev.anvilcraft.thenextforge.forging.EmbedMaterials.all().entrySet()) {
+                var definition = entry.getValue();
+                for (TargetKind kind : definition.kinds()) {
+                    String text = dev.anvilcraft.thenextforge.forging.EmbedMaterials.bonusText(entry.getKey(), 1, kind);
+                    if (text == null || text.isBlank() || text.equals(definition.label())) {
+                        missing.add(entry.getKey() + "/" + kind + " -> '" + text + "'");
+                    }
+                }
+            }
+            helper.assertTrue(missing.isEmpty(),
+                "以下材料的说明落到了兜底分支（tooltip 只会显示材料名），需要补 bonusText 分支：" + missing);
+            helper.succeed();
+        });
+        // 末影珍珠的护符路径：设计 §5 第 4 列要求「掉落直接进背包」，此前只判了手持工具。
+        TestRegistry.register(registerEvent, "ender_pearl_amulet_collects_drops", helper -> {
+            var player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+            helper.assertTrue(!dev.anvilcraft.thenextforge.event.ForgeDropEvents.collectsDrops(player),
+                "空手空包不应触发掉落归仓");
+            ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+            sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:ender_pearl"));
+            player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, sword);
+            helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeDropEvents.collectsDrops(player),
+                "手持带末影珍珠的工具应触发掉落归仓");
+            player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+            helper.assertTrue(!dev.anvilcraft.thenextforge.event.ForgeDropEvents.collectsDrops(player),
+                "工具取走、包里没有护符时不应触发");
+            ItemStack amulet = itemById("anvilcraft:armadillo_amulet");
+            if (amulet.isEmpty()) {
+                helper.succeed();
+                return;
+            }
+            amulet.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:ender_pearl"));
+            player.getInventory().getNonEquipmentItems().set(5, amulet);
+            helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeDropEvents.collectsDrops(player),
+                "随身护符上的末影珍珠也应让掉落归仓（设计 §5 护符列）");
+            helper.succeed();
+        });
+        // 设计对齐：武器「冷却 ±x%」要换算成攻速倍率（冷却 = 1/攻速），不能直接加到基础值上
+        TestRegistry.register(registerEvent, "weapon_cooldown_embeds_follow_design", helper -> {
+            var level = helper.getLevel();
+            var expected = new java.util.LinkedHashMap<String, Double>();
+            expected.put("minecraft:redstone", 0.25D);                       // 冷却 -20% ⇒ 攻速 ×1.25
+            expected.put("anvilcraft:neutronium_ingot", -(1.0D - 1.0D / 1.3D)); // 冷却 +30% ⇒ 攻速 ×(1/1.3)
+            expected.put("minecraft:feather", 3.0D);                         // 冷却 -75% ⇒ 攻速 ×4
+            for (var entry : expected.entrySet()) {
+                var definition = dev.anvilcraft.thenextforge.forging.EmbedMaterials.byId(entry.getKey());
+                var stack = new ItemStack(Items.DIAMOND_SWORD);
+                dev.anvilcraft.thenextforge.forging.EmbedMaterials.apply(stack, definition, TargetKind.WEAPON, 1, level);
+                String materialPath = entry.getKey().substring(entry.getKey().indexOf(':') + 1);
+                var modifier = stack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY)
+                    .modifiers().stream()
+                    .filter(m -> m.attribute().equals(Attributes.ATTACK_SPEED))
+                    .filter(m -> m.modifier().id().getPath().contains(materialPath))
+                    .findFirst().orElse(null);
+                helper.assertTrue(modifier != null, entry.getKey() + " 应写入攻击速度修饰符");
+                if (modifier == null) continue;
+                helper.assertTrue(modifier.modifier().operation()
+                        == net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL,
+                    entry.getKey() + " 的攻速必须是 MULTIPLIED_TOTAL，实际 " + modifier.modifier().operation());
+                helper.assertTrue(near(modifier.modifier().amount(), entry.getValue()),
+                    entry.getKey() + " 的攻速倍率应为 " + entry.getValue() + "，实际 " + modifier.modifier().amount());
+            }
+            helper.succeed();
+        });
+        // 设计：钻石/碎片/锭/纸的耐久倍率不含护符；皇家钢锭含护符
+        TestRegistry.register(registerEvent, "durability_embeds_skip_amulet_per_design", helper -> {
+            for (String id : new String[]{"minecraft:diamond", "minecraft:netherite_scrap",
+                "minecraft:netherite_ingot", "minecraft:paper"}) {
+                helper.assertTrue(!dev.anvilcraft.thenextforge.forging.EmbedMaterials.durabilityApplies(id, TargetKind.AMULET),
+                    id + " 不应改护符耐久（设计只写工具/武器/装甲）");
+                helper.assertTrue(dev.anvilcraft.thenextforge.forging.EmbedMaterials.durabilityApplies(id, TargetKind.ARMOR),
+                    id + " 应改装甲耐久");
+            }
+            helper.assertTrue(dev.anvilcraft.thenextforge.forging.EmbedMaterials
+                    .durabilityApplies("anvilcraft:royal_steel_ingot", TargetKind.AMULET),
+                "皇家钢锭按设计对护符也生效耐久 +20%");
+            helper.succeed();
+        });
+        // 设计：粘液球「降低 50% 移速」——缓慢效果凑不出 50%，必须是精确的移速修饰符
+        TestRegistry.register(registerEvent, "slime_ball_applies_exact_half_slow", helper -> {
+            var level = helper.getLevel();
+            var zombie = helper.spawn(net.minecraft.world.entity.EntityType.ZOMBIE, new BlockPos(1, 1, 1));
+            var player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+            ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+            sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:slime_ball"));
+            dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, zombie, sword, 2.0F);
+            var speed = zombie.getAttribute(Attributes.MOVEMENT_SPEED);
+            var modifier = speed == null ? null
+                : speed.getModifier(dev.anvilcraft.thenextforge.forging.CombatEffects.SLIME_SLOW_ID);
+            helper.assertTrue(modifier != null, "命中后必须挂上粘液球减速");
+            if (modifier != null) {
+                helper.assertTrue(near(modifier.amount(), -0.5D), "减速必须是 -50%，实际 " + modifier.amount());
+                helper.assertTrue(modifier.operation()
+                        == net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL,
+                    "减速必须是 MULTIPLIED_TOTAL，实际 " + modifier.operation());
+            }
+            helper.succeed();
+        });
+        // 设计：不死图腾的免死只认护符
+        TestRegistry.register(registerEvent, "totem_save_requires_amulet_not_armour", helper -> {
+            var player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+            ItemStack chest = new ItemStack(Items.NETHERITE_CHESTPLATE);
+            chest.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:totem_of_undying"));
+            player.setItemSlot(net.minecraft.world.entity.EquipmentSlot.CHEST, chest);
+            dev.anvilcraft.thenextforge.event.EmbedCombat.resetTotemCooldown();
+            helper.assertTrue(!dev.anvilcraft.thenextforge.event.EmbedCombat.totemSaves(helper.getLevel(), player, 100L),
+                "装甲上的不死图腾不应触发免死（设计只写护符）");
+            helper.succeed();
+        });
+        // 设计：青金石「装甲/护符 获得经验 +20%」——走真实事件总线，顺带验证接线
+        TestRegistry.register(registerEvent, "lapis_armour_boosts_any_xp_gain", helper -> {
+            // XpChange 的处理器按真实服务端玩家工作，必须用 FakePlayer
+            var player = net.neoforged.neoforge.common.util.FakePlayerFactory.getMinecraft(helper.getLevel());
+            ItemStack chest = new ItemStack(Items.NETHERITE_CHESTPLATE);
+            chest.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:lapis_lazuli"));
+            player.setItemSlot(net.minecraft.world.entity.EquipmentSlot.CHEST, chest);
+            var event = new net.neoforged.neoforge.event.entity.player.PlayerXpEvent.XpChange(player, 10);
+            net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(event);
+            helper.assertTrue(event.getAmount() == 12, "装甲青金石应让经验 10 → 12，实际 " + event.getAmount());
+            helper.succeed();
+        });
+        // 设计：发酵蜘蛛眼「命中中毒（武器/护符）」——武器没有嵌入、只有护符时也要中毒
+        // 描述矩阵快照：把「材料 × 对象」的全部说明打进日志，便于人工与设计原文逐格核对
+        TestRegistry.register(registerEvent, "embed_description_matrix_snapshot", helper -> {
+            int rows = 0;
+            for (var entry : dev.anvilcraft.thenextforge.forging.EmbedMaterials.all().entrySet()) {
+                for (TargetKind kind : entry.getValue().kinds()) {
+                    String text = dev.anvilcraft.thenextforge.forging.EmbedMaterials
+                        .bonusText(entry.getKey(), 1, kind);
+                    TheNextForge.LOGGER.info("[TNF-MATRIX] {} | {} | {}", entry.getKey(), kind, text);
+                    rows++;
+                }
+            }
+            helper.assertTrue(rows > 100, "矩阵行数异常：" + rows);
+            TheNextForge.LOGGER.info("[TNF-MATRIX] total rows = {}", rows);
+            helper.succeed();
+        });
+        // 护符（展示框）：判定盒按设计「周围 3*3」
+        TestRegistry.register(registerEvent, "emerald_amulet_range_is_three_by_three", helper -> {
+            var box = dev.anvilcraft.thenextforge.forging.ForgingService.villagerBox(BlockPos.ZERO);
+            helper.assertTrue(near(box.getXsize(), 3.0) && near(box.getYsize(), 3.0) && near(box.getZsize(), 3.0),
+                "村民判定盒必须是 3×3×3，实际 " + box.getXsize() + "×" + box.getYsize() + "×" + box.getZsize());
+            helper.spawn(net.minecraft.world.entity.EntityType.VILLAGER, new BlockPos(1, 1, 1));
+            BlockPos base = helper.absolutePos(new BlockPos(0, 1, 0));
+            helper.assertTrue(dev.anvilcraft.thenextforge.forging.ForgingService.hasVillagerNear(helper.getLevel(), base),
+                "村民在 3×3 内应判定为有村民");
+            BlockPos far = base.offset(6, 0, 6);
+            helper.assertTrue(!dev.anvilcraft.thenextforge.forging.ForgingService.hasVillagerNear(helper.getLevel(), far),
+                "6 格外的基底不应判定为有村民");
+            helper.succeed();
+        });
+        // 护符：蓝宝石在 3×1×3 内只吃掉一块岩浆源
+        TestRegistry.register(registerEvent, "sapphire_amulet_eats_exactly_one_lava", helper -> {
+            BlockPos base = helper.absolutePos(new BlockPos(2, 1, 2));
+            helper.setBlock(1, 1, 2, Blocks.LAVA);
+            helper.setBlock(3, 1, 2, Blocks.LAVA);
+            helper.assertTrue(dev.anvilcraft.thenextforge.forging.ForgingService.consumeLava(helper.getLevel(), base),
+                "3×1×3 内有岩浆源时应返回 true");
+            int lava = 0;
+            int obsidian = 0;
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    var state = helper.getLevel().getBlockState(base.offset(dx, 0, dz));
+                    if (state.is(Blocks.LAVA)) lava++;
+                    if (state.is(Blocks.OBSIDIAN)) obsidian++;
+                }
+            }
+            helper.assertTrue(lava == 1 && obsidian == 1,
+                "应恰好把一块岩浆源换成黑曜石（剩 " + lava + " 岩浆 / " + obsidian + " 黑曜石）");
+            BlockPos empty = helper.absolutePos(new BlockPos(6, 1, 6));
+            helper.assertTrue(!dev.anvilcraft.thenextforge.forging.ForgingService.consumeLava(helper.getLevel(), empty),
+                "周围没有岩浆源时必须返回 false（不额外加级）");
+            helper.succeed();
+        });
+        // 护符：寂静屏蔽特效与声音，但文字照常
+        TestRegistry.register(registerEvent, "silence_amulet_only_keeps_text", helper -> {
+            helper.assertTrue(!dev.anvilcraft.thenextforge.forging.ForgingService.effectsEnabled(java.util.Set.of("silence")),
+                "带寂静护符时不应播放特效/声音");
+            helper.assertTrue(dev.anvilcraft.thenextforge.forging.ForgingService.effectsEnabled(java.util.Set.of("armadillo")),
+                "不带寂静时应正常播放");
+            helper.succeed();
+        });
+        // 护符：损毁抵挡次序 犰狳 > 绿宝石（黄玉在 DESTROY 分支之后，见服务实现）
+        TestRegistry.register(registerEvent, "protection_order_is_armadillo_then_emerald", helper -> {
+            var level = helper.getLevel();
+            helper.spawn(net.minecraft.world.entity.EntityType.VILLAGER, new BlockPos(1, 1, 1));
+            BlockPos base = helper.absolutePos(new BlockPos(0, 1, 0));
+            var amulets = java.util.Set.of("armadillo", "emerald", "topaz");
+            helper.assertTrue("armadillo".equals(dev.anvilcraft.thenextforge.forging.ForgingService.pickProtector(
+                    level, base, amulets, ForgingData.EMPTY)),
+                "次序第一应是犰狳");
+            helper.assertTrue("emerald".equals(dev.anvilcraft.thenextforge.forging.ForgingService.pickProtector(
+                    level, base, amulets, ForgingData.EMPTY.withProtectionUsed("armadillo"))),
+                "犰狳用过之后轮到绿宝石");
+            helper.assertTrue(dev.anvilcraft.thenextforge.forging.ForgingService.pickProtector(
+                    level, base, amulets,
+                    ForgingData.EMPTY.withProtectionUsed("armadillo").withProtectionUsed("emerald")) == null,
+                "犰狳与绿宝石都用过时，pickProtector 不再给候选（黄玉走独立分支）");
+            helper.succeed();
+        });
+        // 护符：保护次数在等级归 0 时重置（设计：超限铁砧归 0 后才重置）
+        TestRegistry.register(registerEvent, "protections_reset_when_level_hits_zero", helper -> {
+            var data = ForgingData.EMPTY.withProtectionUsed("armadillo").withNextHitProtected(true)
+                .withLevel(ForgingLine.ANVIL, 1);
+            var after = dev.anvilcraft.thenextforge.forging.ForgingRules.applyFailure(
+                data, ForgingLine.ANVIL, 1, false, false);
+            helper.assertTrue(after.level(ForgingLine.ANVIL) == 0, "等级应归 0");
+            helper.assertTrue(after.protections().isEmpty() && !after.nextHitProtected(),
+                "归 0 后保护次数与下一锤保护都要清空，实际 " + after.protections());
+            helper.succeed();
+        });
+        // 护符：铁砧护符把数值提升整体 +10%
+        TestRegistry.register(registerEvent, "anvil_amulet_boosts_upgrade_by_ten_percent", helper -> {
+            var level = helper.getLevel();
+            ItemStack plain = new ItemStack(Items.DIAMOND_SWORD);
+            ItemStack boosted = new ItemStack(Items.DIAMOND_SWORD);
+            dev.anvilcraft.thenextforge.forging.ForgingRules.applyUpgrade(
+                plain, TargetKind.WEAPON, ForgingLine.ANVIL, 1, net.minecraft.util.RandomSource.create(7L), 1.0D);
+            dev.anvilcraft.thenextforge.forging.ForgingRules.applyUpgrade(
+                boosted, TargetKind.WEAPON, ForgingLine.ANVIL, 1, net.minecraft.util.RandomSource.create(7L), 1.1D);
+            var mul = net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADD_MULTIPLIED_BASE;
+            double a = embedAmount(plain, Attributes.ATTACK_DAMAGE, mul);
+            double b = embedAmount(boosted, Attributes.ATTACK_DAMAGE, mul);
+            helper.assertTrue(a > 0 && near(b, a * 1.1), "铁砧护符应把提升值放大 10%：" + a + " -> " + b);
+            helper.succeed();
+        });
+        // 犰狳：『保护下一次锤击』在这一锤开始时就被消耗，不论成败（用户裁定）
+        TestRegistry.register(registerEvent, "armadillo_next_strike_consumes_protection_always", helper -> {
+            helper.setBlock(1, 1, 1, Blocks.ANVIL);
+            BlockPos pos = helper.absolutePos(new BlockPos(1, 1, 1));
+            ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+            sword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withNextHitProtected(true));
+            ForgeDisplay.place(helper.getLevel(), pos, sword, 0.0F);
+            var player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+            player.totalExperience = 500;
+            dev.anvilcraft.thenextforge.forging.ForgingService.hammer(player, helper.getLevel(), pos,
+                ForgingLine.ANVIL, ForgingMaterial.BASE, ForgingMaterial.BASE);
+            var display = ForgeDisplay.find(helper.getLevel(), pos);
+            helper.assertTrue(display != null, "带犰狳后续保护的那一锤不应把物品打碎");
+            if (display != null) {
+                helper.assertTrue(!forgingOf(ForgeDisplay.stackOf(display)).nextHitProtected(),
+                    "不论这一锤成功与否，犰狳的后续保护都必须被消耗掉");
+            }
+            helper.succeed();
+        });
+        // 猫护符：连续成功两次后第三次才追加，且失败要断连
+        TestRegistry.register(registerEvent, "cat_amulet_counts_only_consecutive_successes", helper -> {
+            var svc = dev.anvilcraft.thenextforge.forging.ForgingService.class;
+            helper.assertTrue(dev.anvilcraft.thenextforge.forging.ForgingService.catOutcome(true, 0).streak() == 1,
+                "第一次成功：计数 0 → 1，无追加");
+            helper.assertTrue(dev.anvilcraft.thenextforge.forging.ForgingService.catOutcome(true, 1).streak() == 2,
+                "第二次成功：计数 1 → 2，无追加");
+            var third = dev.anvilcraft.thenextforge.forging.ForgingService.catOutcome(true, 2);
+            helper.assertTrue(third.levelBonus() == 1 && third.streak() == 0,
+                "第三次成功：追加 1 级并重置计数，实际 " + third);
+            var failed = dev.anvilcraft.thenextforge.forging.ForgingService.catOutcome(false, 2);
+            helper.assertTrue(failed.levelBonus() == 0 && failed.streak() == 0,
+                "失败必须断开连续计数（设计强调『连续』），实际 " + failed);
+            helper.succeed();
+        });
+        // 浮霜转经验：口径与浮霜铁砧一致（方块经验 ×4，最低 1 点）
+        TestRegistry.register(registerEvent, "frost_embed_uses_anvil_xp_rate", helper -> {
+            var drops = dev.anvilcraft.thenextforge.event.ForgeDropEvents.class;
+            helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeDropEvents.FROST_XP_MULTIPLIER == 4,
+                "浮霜倍率必须是 4（对标湮灭附魔 BLOCK_EXPERIENCE）");
+            helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeDropEvents.frostXpFor(0) == 1,
+                "无经验方块也要给 1 点");
+            helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeDropEvents.frostXpFor(1) == 4,
+                "1 点方块经验应换成 4 点");
+            helper.assertTrue(dev.anvilcraft.thenextforge.event.ForgeDropEvents.frostXpFor(5) == 20,
+                "5 点方块经验应换成 20 点");
+            helper.succeed();
+        });
+        // 文本矩阵：tooltip 必须按设计原文给出四列各自的说明，不能漏写设计里的限定
+        TestRegistry.register(registerEvent, "embed_descriptions_cover_every_design_column", helper -> {
+            String[][] cases = {
+                {"minecraft:redstone", "AMULET", "速度", "红石护符要给速度"},
+                {"minecraft:gold_nugget", "TOOL", "最大耐久 -20%", "金粒工具要写耐久代价"},
+                {"minecraft:gold_ingot", "TOOL", "时运 +3", "金锭工具要写时运"},
+                {"minecraft:diamond", "TOOL", "耐久 +30%", "钻石工具同时给挖掘等级与耐久"},
+                {"minecraft:netherite_scrap", "ARMOR", "耐久 +40%", "碎片装甲要写耐久"},
+                {"minecraft:netherite_ingot", "ARMOR", "耐久 +100%", "锭装甲要写耐久"},
+                {"#minecraft:logs", "ARMOR", "最大生命值 +1", "原木装甲要写最大生命"},
+                {"#minecraft:logs", "AMULET", "手持物品", "原木护符要写回手持"},
+                {"anvilcraft:frost_metal_ingot", "TOOL", "掉落转化为经验", "浮霜工具要写掉落转经验"},
+                {"anvilcraft:ember_metal_ingot", "TOOL", "时运", "余烬工具熔炼要写时运"},
+                {"anvilcraft:amber", "WEAPON", "上限 100%", "琥珀要写怨恨上限"},
+                {"minecraft:heart_of_the_sea", "ARMOR", "水中", "海洋之心庇佑要写「水中」"}
+            };
+            for (String[] c : cases) {
+                String text = dev.anvilcraft.thenextforge.forging.EmbedMaterials
+                    .bonusText(c[0], 1, TargetKind.valueOf(c[1]));
+                helper.assertTrue(text != null && text.contains(c[2]),
+                    c[3] + "：期望包含「" + c[2] + "」，实际 " + text);
+            }
+            // 唯一嵌入要在描述里标出来
+            ItemStack echoSword = new ItemStack(Items.DIAMOND_SWORD);
+            echoSword.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:echo_shard"));
+            String echoText = dev.anvilcraft.thenextforge.forging.EmbedMaterials
+                .bonusTextFor(echoSword, "minecraft:echo_shard", 1);
+            helper.assertTrue(echoText.contains("唯一嵌入"), "回响碎片必须标注唯一嵌入，实际 " + echoText);
+            helper.succeed();
+        });
+        TestRegistry.register(registerEvent, "spider_eye_amulet_poisons_on_hit", helper -> {
+            var level = helper.getLevel();
+            // 用猪而不是僵尸：不死生物免疫中毒（既有测试同样踩过这个坑）
+            var zombie = helper.spawn(net.minecraft.world.entity.EntityType.PIG, new BlockPos(1, 1, 1));
+            var player = helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+            ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+            player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, sword);
+            ItemStack amulet = itemById("anvilcraft:armadillo_amulet");
+            if (amulet.isEmpty()) {
+                helper.succeed();
+                return;
+            }
+            amulet.set(ModDataComponents.FORGING.get(), ForgingData.EMPTY.withEmbed("minecraft:fermented_spider_eye"));
+            player.getInventory().add(amulet);
+            helper.assertTrue(dev.anvilcraft.thenextforge.forging.CombatEffects
+                    .carriedAmuletEmbeds(player, "minecraft:fermented_spider_eye") == 1,
+                "测试前置：护符必须真的在背包里");
+            dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(level, player, zombie, sword, 2.0F);
+            helper.assertTrue(zombie.hasEffect(net.minecraft.world.effect.MobEffects.POISON),
+                "护符上的蜘蛛眼也应让命中中毒");
+            helper.succeed();
         });
     }
 

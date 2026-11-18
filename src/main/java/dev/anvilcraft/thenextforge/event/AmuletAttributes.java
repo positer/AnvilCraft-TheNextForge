@@ -1,144 +1,79 @@
 package dev.anvilcraft.thenextforge.event;
 
 import dev.anvilcraft.thenextforge.TheNextForge;
-import dev.anvilcraft.thenextforge.init.ModDataComponents;
+import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.ItemAttributeModifiers;
-import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
-
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.WeakHashMap;
 
-/**
- * 携带护符的属性生效。
- *
- * <p>护符不是装备，写在护符物品上的属性修饰符默认不会作用到玩家；
- * 这里每 20 tick 把随身护符的属性同步到玩家身上，并清掉上一轮的副本。
- */
+/** 携带护符的嵌入属性；展示框的锻造效果由 Amulets 独立处理。 */
+
 public final class AmuletAttributes {
-    private static final String NAMESPACE = "thenextforge";
-    private static final Map<UUID, Set<ResourceLocation>> APPLIED = new ConcurrentHashMap<>();
-    private static int counter;
-
-    private AmuletAttributes() {
-    }
+    // 弱键且值不含玩家/世界；不把离线玩家 UUID 永久留在静态表。
+    private static final Map<Player, Map<ResourceLocation, Applied>> APPLIED = new WeakHashMap<>();
+    private record Applied(Holder<Attribute> attribute, AttributeModifier modifier) { }
+    private AmuletAttributes() { }
 
     @SubscribeEvent
     public static void onPlayerTick(PlayerTickEvent.Post event) {
-        if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        if (player.tickCount % 20 != 0) return;
-        sync(player);
+        if (event.getEntity() instanceof ServerPlayer player && player.tickCount % 20 == 0) sync(player);
     }
 
-    /**
-     * 把玩家随身护符的属性修饰符同步到玩家，返回应用的条目数。
-     */
-    public static int sync(net.minecraft.world.entity.player.Player player) {
-        clear(player);
-        Set<ResourceLocation> applied = new HashSet<>();
+    /** 稳定 id，按差异增删；装备没变时不重建玩家的属性修饰符。 */
+    public static int sync(Player player) {
+        Map<ResourceLocation, Applied> desired = new HashMap<>();
         int index = 0;
-        for (ItemStack stack : carriedAmulets(player)) {
-            ItemAttributeModifiers mods = stack.getOrDefault(
-                DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY
-            );
-            for (ItemAttributeModifiers.Entry entry : mods.modifiers()) {
-                AttributeInstance instance = player.getAttributes().getInstance(entry.attribute());
-                if (instance == null) continue;
-                ResourceLocation id = ResourceLocation.fromNamespaceAndPath(
-                    NAMESPACE, "amulet/" + index + "/" + (counter++)
-                );
-                AttributeModifier modifier = entry.modifier();
-                instance.addTransientModifier(new AttributeModifier(
-                    id, modifier.amount(), modifier.operation()
-                ));
-                applied.add(id);
-            }
-            index++;
+        for (ItemStack amulet : ForgeItemTicker.carriedAmulets(player)) {
+            collect(player, desired, amulet, "amulet/" + index++, null);
         }
-        // 护甲的 MAX_HEALTH 不会经装备槽自动生效，这里补一次
-        int armorIndex = 0;
-        for (ItemStack armor : player.getInventory().armor) {
-            if (armor.isEmpty()) { armorIndex++; continue; }
-            ItemAttributeModifiers mods = armor.getOrDefault(
-                DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY
-            );
-            for (ItemAttributeModifiers.Entry entry : mods.modifiers()) {
-                if (!entry.attribute().equals(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH)) continue;
-                AttributeInstance instance = player.getAttributes().getInstance(entry.attribute());
-                if (instance == null) continue;
-                ResourceLocation id = ResourceLocation.fromNamespaceAndPath(
-                    NAMESPACE, "armor_health/" + armorIndex + "/" + (counter++)
-                );
-                instance.addTransientModifier(new AttributeModifier(
-                    id, entry.modifier().amount(), entry.modifier().operation()
-                ));
-                applied.add(id);
-            }
-            armorIndex++;
+        // 旧版装甲嵌入是 MAINHAND；新写入使用 ARMOR，不重复补偿。
+        for (EquipmentSlot slot : EquipmentSlot.values()) {
+            if (slot.isArmor()) collect(player, desired, player.getItemBySlot(slot), "legacy_armour/" + slot.getName(), slot);
         }
-        APPLIED.put(player.getUUID(), applied);
-        if (!applied.isEmpty()) {
-            TheNextForge.LOGGER.info("[TNF] amulet attributes applied: {} modifiers", applied.size());
-        }
-        return applied.size();
-    }
-
-    private static void clear(net.minecraft.world.entity.player.Player player) {
-        Set<ResourceLocation> old = APPLIED.remove(player.getUUID());
-        if (old == null || old.isEmpty()) return;
-        for (AttributeInstance instance : player.getAttributes().getSyncableAttributes()) {
-            for (ResourceLocation id : old) {
-                instance.removeModifier(id);
+        Map<ResourceLocation, Applied> old = APPLIED.getOrDefault(player, Map.of());
+        for (var entry : old.entrySet()) {
+            if (!entry.getValue().equals(desired.get(entry.getKey()))) {
+                var attribute = player.getAttribute(entry.getValue().attribute());
+                if (attribute != null) attribute.removeModifier(entry.getKey());
             }
         }
-    }
-
-    /**
-     * 只收集展示框里（{@code ItemDisplay}）的护符——护符的锻造加成只在被供奉时提供。
-     */
-    /**
-     * 收集基底铁砧/砂轮侧面展示框里的护符（设计：至多 4 件）。
-     *
-     * <p>物品展示框是原版 {@link ItemFrame}，其附着方块必须是铁砧或砂轮。
-     */
-    private static List<ItemStack> carriedAmulets(net.minecraft.world.entity.player.Player player) {
-        List<ItemStack> result = new ArrayList<>();
-        if (!(player.level() instanceof net.minecraft.server.level.ServerLevel level)) return result;
-        int anvilCount = 0;
-        for (net.minecraft.world.entity.decoration.ItemFrame frame : level.getEntitiesOfClass(
-            net.minecraft.world.entity.decoration.ItemFrame.class,
-            player.getBoundingBox().inflate(16.0))) {
-            net.minecraft.world.level.block.state.BlockState attached =
-                level.getBlockState(frame.getPos().relative(frame.getDirection().getOpposite()));
-            String blockId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
-                .getKey(attached.getBlock()).getPath();
-            if (!(blockId.contains("anvil") || blockId.contains("grindstone"))) continue;
-            ItemStack stack = frame.getItem();
-            if (!isAmulet(stack)) continue;
-            result.add(stack);
-            if (++anvilCount >= 4) break;
+        for (var entry : desired.entrySet()) {
+            var instance = player.getAttribute(entry.getValue().attribute());
+            if (instance == null) continue;
+            if (!entry.getValue().equals(old.get(entry.getKey())) || !instance.hasModifier(entry.getKey())) {
+                instance.removeModifier(entry.getKey());
+                instance.addTransientModifier(entry.getValue().modifier());
+            }
         }
-        return result;
+        if (desired.isEmpty()) APPLIED.remove(player);
+        else APPLIED.put(player, desired);
+        return desired.size();
     }
 
-    private static boolean isAmulet(ItemStack stack) {
-        if (stack.isEmpty()) return false;
-        var id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
-        if (!id.getPath().endsWith("_amulet")) return false;
-        var forging = stack.get(ModDataComponents.FORGING.get());
-        return forging != null && !forging.embeds().isEmpty();
+    private static void collect(Player player, Map<ResourceLocation, Applied> desired, ItemStack stack,
+                                String source, EquipmentSlot legacySlot) {
+        var modifiers = stack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY);
+        int index = 0;
+        for (var entry : modifiers.modifiers()) {
+            var original = entry.modifier();
+            if (!original.id().getNamespace().equals(TheNextForge.MOD_ID)) continue;
+            if (legacySlot != null && entry.slot().test(legacySlot)) continue;
+            if (legacySlot == null && stack == player.getMainHandItem() && entry.slot().test(EquipmentSlot.MAINHAND)) continue;
+            ResourceLocation id = ResourceLocation.fromNamespaceAndPath(TheNextForge.MOD_ID, "carried/" + source + "/" + index++);
+            desired.put(id, new Applied(entry.attribute(),
+                new AttributeModifier(id, original.amount(), original.operation())));
+        }
     }
 }

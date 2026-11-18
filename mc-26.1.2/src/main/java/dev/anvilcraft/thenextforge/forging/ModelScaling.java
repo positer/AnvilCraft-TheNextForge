@@ -6,8 +6,8 @@ import net.minecraft.world.item.ItemStack;
 /**
  * 被锻造物品的**真实渲染**放大倍率。
  *
- * <p>同一件物品在手持、物品栏、第三人称（实体手持）与掉落物形态下都走原版的
- * {@code ItemRenderer#render}，所以只要在那里按本类给出的倍率缩放，四种形态就是一致的真实放大。
+ * <p>统一计算 GUI、手持、第三人称与掉落物倍率；两代在各自完整渲染入口使用，
+ * 展示物需抵消已经保存到实体变换中的 TNF 倍率。
  *
  * <p>受两层开关控制：
  * <ol>
@@ -16,6 +16,23 @@ import net.minecraft.world.item.ItemStack;
  * </ol>
  */
 public final class ModelScaling {
+    /** 旧锻造台展示变换已存一次倍率；绘制时抵消，避免平方放大。 */
+    public static float displayCorrection(com.mojang.math.Transformation transform) {
+        var translation = transform.translation();
+        var left = transform.leftRotation();
+        var right = transform.rightRotation();
+        var scale = transform.scale();
+        float epsilon = 0.0001F;
+        float half = (float) Math.sqrt(0.5);
+        boolean forgePose = Math.abs(translation.x()) < epsilon && Math.abs(translation.y() - 0.12F) < epsilon
+            && Math.abs(translation.z()) < epsilon && Math.abs(left.x()) < epsilon
+            && Math.abs(left.y()) < epsilon && Math.abs(left.z()) < epsilon && Math.abs(Math.abs(left.w()) - 1) < epsilon
+            && Math.abs(Math.abs(right.x() * half + right.w() * half) - 1) < epsilon;
+        if (!forgePose || !Float.isFinite(scale.x()) || scale.x() <= 0
+            || Math.abs(scale.x() - scale.y()) > epsilon || Math.abs(scale.x() - scale.z()) > epsilon) return 1.0F;
+        return 1.0F / scale.x();
+    }
+
     private ModelScaling() {
     }
 

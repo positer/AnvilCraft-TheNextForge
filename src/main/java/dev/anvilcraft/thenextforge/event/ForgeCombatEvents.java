@@ -55,7 +55,7 @@ public final class ForgeCombatEvents {
         ForgingData data = weapon.get(ModDataComponents.FORGING.get());
 
         // 设计：武器 30% + 护符 10%，不同来源的换算百分比**加算**（同时存在 = 40%）
-        float weaponVoid = data != null && data.hasEmbed("anvilcraft:void_matter") ? 0.3F : 0.0F;
+        float weaponVoid = data != null && data.hasActiveEmbed("anvilcraft:void_matter") ? 0.3F : 0.0F;
         float amuletVoid = dev.anvilcraft.thenextforge.forging.EmbedPresence.carried(
             player, "anvilcraft:void_matter") ? 0.1F : 0.0F;
 
@@ -67,7 +67,7 @@ public final class ForgeCombatEvents {
                 VOID_PENDING.put(living, original * ratio);
             }
         }
-        if (data != null && data.hasEmbed("anvilcraft:frost_metal_ingot")) {
+        if (data != null && data.hasActiveEmbed("anvilcraft:frost_metal_ingot")) {
             int enchantCount = weapon.getOrDefault(
                 net.minecraft.core.component.DataComponents.ENCHANTMENTS,
                 net.minecraft.world.item.enchantment.ItemEnchantments.EMPTY
@@ -76,7 +76,7 @@ public final class ForgeCombatEvents {
                 event.setNewDamage(event.getNewDamage() * (1.0F + 0.05F * enchantCount));
             }
         }
-        if (data != null && data.hasEmbed("anvilcraft:void_matter") == false
+        if (data != null && data.hasActiveEmbed("anvilcraft:void_matter") == false
             && dev.anvilcraft.thenextforge.forging.EmbedPresence.carried(player, "anvilcraft:frost_metal_ingot")) {
             int playerLevel = Math.max(0, player.experienceLevel);
             if (playerLevel > 0) {
@@ -113,7 +113,7 @@ public final class ForgeCombatEvents {
      */
     public static int applyAmberMark(ForgingData data, LivingEntity target) {
         if (data == null || target == null) return -1;
-        int amberCount = (int) data.embeds().stream().filter("anvilcraft:amber"::equals).count();
+        int amberCount = (int) data.activeEmbeds().stream().filter("anvilcraft:amber"::equals).count();
         if (amberCount <= 0) return -1;
         return dev.anvilcraft.thenextforge.forging.AmberMarking.apply(target, amberCount);
     }
@@ -121,7 +121,7 @@ public final class ForgeCombatEvents {
     private static boolean carriesAmuletEmbed(Player player, String material) {
         for (ItemStack stack : player.getInventory().items) {
             ForgingData data = stack.get(ModDataComponents.FORGING.get());
-            if (data != null && data.hasEmbed(material)) return true;
+            if (data != null && data.hasActiveEmbed(material)) return true;
         }
         return false;
     }
@@ -129,7 +129,7 @@ public final class ForgeCombatEvents {
     private static boolean carriesCursedAmulet(Player player) {
         for (ItemStack stack : player.getInventory().items) {
             ForgingData data = stack.get(ModDataComponents.FORGING.get());
-            if (data != null && data.hasEmbed("anvilcraft:cursed_gold_ingot")) return true;
+            if (data != null && data.hasActiveEmbed("anvilcraft:cursed_gold_ingot")) return true;
         }
         return false;
     }
@@ -155,6 +155,12 @@ public final class ForgeCombatEvents {
         return curses;
     }
 
+    /** 粘液球减速到期摘除：只做一次 map 查询，成本可忽略。 */
+    @SubscribeEvent
+    public static void onEntityTick(net.neoforged.neoforge.event.tick.EntityTickEvent.Post event) {
+        dev.anvilcraft.thenextforge.forging.CombatEffects.expireSlimeSlow(event.getEntity());
+    }
+
     @SubscribeEvent
     public static void onDamage(LivingDamageEvent.Post event) {
         Entity attacker = event.getSource().getEntity();
@@ -167,7 +173,7 @@ public final class ForgeCombatEvents {
             "[TNF] combat {} hit {} with {} anvil={} embeds={} damage={}",
             player.getName().getString(), target.getType(), weapon.getItem(),
             data == null ? 0 : data.anvilLevel(),
-            data == null ? java.util.List.of() : data.embeds(),
+            data == null ? java.util.List.of() : data.activeEmbeds(),
             String.format("%.2f", event.getNewDamage())
         );
         // 设计：龙蛋 / 不死图腾 → 命中追加魔法伤害；旋风棒 → 风弹爆炸；虚空 → 结算预扣段落
@@ -184,13 +190,13 @@ public final class ForgeCombatEvents {
                 dev.anvilcraft.thenextforge.event.EmbedCombat.applyVoidDamage(target, voidPending);
             }
         }
-        if (data == null || data.embeds().isEmpty()) return;
+        if (data == null || data.activeEmbeds().isEmpty()) return;
         dev.anvilcraft.thenextforge.forging.CombatEffects.applyOnHit(
             level, player, target, weapon, event.getNewDamage()
         );
     }
 
     private static int count(ForgingData data, String id) {
-        return (int) data.embeds().stream().filter(id::equals).count();
+        return (int) data.activeEmbeds().stream().filter(id::equals).count();
     }
 }

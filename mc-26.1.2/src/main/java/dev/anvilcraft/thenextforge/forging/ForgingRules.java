@@ -123,7 +123,7 @@ public final class ForgingRules {
             int tier = (level - 20) / 5 + 1;
             base *= Math.pow(1.5, tier);
         }
-        return Math.max(1, (int) Math.round(base));
+        return (int) Math.max(1L, Math.min(Integer.MAX_VALUE, Math.round(base)));
     }
 
     /**
@@ -139,6 +139,9 @@ public final class ForgingRules {
 
     public static String applyUpgrade(ItemStack stack, TargetKind kind, ForgingLine line, int newLevel,
                                       RandomSource random, double multiplier) {
+        var pool = dev.anvilcraft.thenextforge.api.TnfApi.upgrades(stack);
+        var custom = pool == null ? null : pool.rule(kind, line);
+        if (custom != null) return dev.anvilcraft.thenextforge.api.TnfApi.applyUpgradeRule(stack, kind, line, newLevel, random, multiplier, custom);
         // 数值区间与权重来自 ForgeRulesData（设计 L19：数据驱动），这里只负责把结果落到物品上
         List<ForgeRulesData.Outcome> eligible = ForgeRulesData.eligible(kind, line, stack);
         ForgeRulesData.Outcome outcome = ForgeRulesData.pick(eligible, random);
@@ -161,7 +164,7 @@ public final class ForgingRules {
             case "cooldown" -> {
                 double amount = raw * multiplier;
                 addModifier(stack, Attributes.ATTACK_SPEED, amount,
-                    AttributeModifier.Operation.ADD_MULTIPLIED_BASE, "weapon_cooldown", newLevel);
+                    AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL, "weapon_cooldown", newLevel);
                 yield String.format("攻击冷却回复 +%.1f%%", amount * 100.0);
             }
             case "sweep" -> {
@@ -172,12 +175,12 @@ public final class ForgingRules {
             }
             case "mining" -> {
                 double amount = raw * multiplier;
-                addModifier(stack, Attributes.MINING_EFFICIENCY, amount,
+                addModifier(stack, Attributes.BLOCK_BREAK_SPEED, amount,
                     AttributeModifier.Operation.ADD_MULTIPLIED_BASE, "tool_mining", newLevel);
                 yield String.format("挖掘速度 +%.1f%%", amount * 100.0);
             }
             case "durability" -> {
-                EmbedMaterials.scaleDurability(stack, 1.0 + raw);
+                ForgeDurability.upgrade(stack, line, newLevel, 1.0 + raw);
                 yield String.format("耐久 +%.1f%%", raw * 100.0);
             }
             case "armor_flat" -> {
@@ -189,7 +192,7 @@ public final class ForgingRules {
                 addModifier(stack, Attributes.MOVEMENT_SPEED, raw,
                     AttributeModifier.Operation.ADD_MULTIPLIED_BASE, "armor_speed", newLevel);
                 // 设计：砂轮升级降低 5% 耐久
-                EmbedMaterials.scaleDurability(stack, 0.95);
+                ForgeDurability.upgrade(stack, line, newLevel, 0.95);
                 yield String.format("移速 +%.1f%%（耐久 -5%%）", raw * 100.0);
             }
             case "amulet_damage" -> {
@@ -240,9 +243,10 @@ public final class ForgingRules {
      * 否则被降掉的等级会继续加成。所有写回都必须走这里，不要再直接 set 组件。
      */
     public static void write(ItemStack stack, ForgingData data) {
-        ItemAttributeModifiers modifiers = stack.getOrDefault(
-            DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY
-        );
+        ForgingData before = stack.getOrDefault(ModDataComponents.FORGING.get(), ForgingData.EMPTY);
+        ForgeQuality.refreshAppearance(stack, data);
+        ForgeDurability.prune(stack, data);
+        ItemAttributeModifiers modifiers = dev.anvilcraft.thenextforge.forging.ForgeAttributes.current(stack);
         java.util.List<ItemAttributeModifiers.Entry> kept =
             new java.util.ArrayList<>(modifiers.modifiers().size());
         boolean pruned = false;
@@ -251,6 +255,19 @@ public final class ForgingRules {
                 pruned = true;
                 continue;
             }
+            if (ForgingSummary.isForgeModifier(entry.modifier().id())) {
+                String key = ForgingSummary.keyOf(entry.modifier().id());
+                if ("tool_mining".equals(key) && entry.attribute().equals(Attributes.MINING_EFFICIENCY)) {
+                    entry = new ItemAttributeModifiers.Entry(Attributes.BLOCK_BREAK_SPEED, entry.modifier(), entry.slot());
+                    pruned = true;
+                } else if ("weapon_cooldown".equals(key)
+                    && entry.modifier().operation() == AttributeModifier.Operation.ADD_MULTIPLIED_BASE) {
+                    entry = new ItemAttributeModifiers.Entry(entry.attribute(),
+                        new AttributeModifier(entry.modifier().id(), entry.modifier().amount(),
+                            AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL), entry.slot());
+                    pruned = true;
+                }
+            }
             kept.add(entry);
         }
         if (pruned) {
@@ -258,18 +275,29 @@ public final class ForgingRules {
                 new ItemAttributeModifiers(java.util.List.copyOf(kept)));
         }
         stack.set(ModDataComponents.FORGING.get(), data);
+        dev.anvilcraft.thenextforge.api.TnfApi.publishDataChange(stack, before, data);
     }
 
     /** 该条锻造修饰符的等级是否已经高于物品当前的对应等级。 */
     private static boolean isObsolete(Identifier id, ForgingData data) {
         if (!ForgingSummary.isForgeModifier(id)) return false;
         int level = ForgingSummary.levelOf(id);
-        int cap = data.level(GRINDSTONE_KEYS.contains(ForgingSummary.keyOf(id))
+        int cap = data.level((GRINDSTONE_KEYS.contains(ForgingSummary.keyOf(id)) || ForgingSummary.keyOf(id).startsWith("api_g_"))
             ? ForgingLine.GRINDSTONE : ForgingLine.ANVIL);
         // 旧格式条目没有等级段，按「一次成功」计：只有整条线归零时才清除
         return level >= 0 ? level > cap : cap <= 0;
     }
 
+
+    /** API 维护的修饰符沿用等级寻址，降级自动清理；slot 明确指定，避免多角色误落装备槽。 */
+    public static void addApiModifier(ItemStack stack, Holder<Attribute> attribute, double amount,
+                                      AttributeModifier.Operation operation, String key, int level, EquipmentSlotGroup slot) {
+        if (!key.startsWith("api_a_") && !key.startsWith("api_g_")) throw new IllegalArgumentException("Reserved API modifier key");
+        if (!Double.isFinite(amount) || level < 1) throw new IllegalArgumentException("Invalid API modifier");
+        var current = dev.anvilcraft.thenextforge.forging.ForgeAttributes.current(stack);
+        var id = Identifier.fromNamespaceAndPath("thenextforge", "forging/" + key + "/" + level);
+        stack.set(DataComponents.ATTRIBUTE_MODIFIERS, current.withModifierAdded(attribute, new AttributeModifier(id, amount, operation), slot));
+    }
 
     private static void addModifier(
         ItemStack stack,
@@ -279,9 +307,7 @@ public final class ForgingRules {
         String key,
         int level
     ) {
-        ItemAttributeModifiers current = stack.getOrDefault(
-            DataComponents.ATTRIBUTE_MODIFIERS, stack.getItem().getDefaultAttributeModifiers(stack)
-        );
+        ItemAttributeModifiers current = dev.anvilcraft.thenextforge.forging.ForgeAttributes.current(stack);
         Identifier id = Identifier.fromNamespaceAndPath(
             "thenextforge", "forging/" + key + "/" + level
         );

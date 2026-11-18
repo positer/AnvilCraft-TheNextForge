@@ -116,6 +116,15 @@ public record ForgingData(
         return copy(anvilLevel, grindstoneLevel, anvilTokens, grindTokens, List.copyOf(next), catStreak, xpSpent, protections, nextHitProtected);
     }
 
+    /** 内置事件效果视图与原始材料记录分开，唯一性和逆序取出始终使用原始记录。 */
+    public boolean hasActiveEmbed(String materialId) {
+        return hasEmbed(materialId) && dev.anvilcraft.thenextforge.api.TnfApi.builtinEffectsEnabled(materialId);
+    }
+    public List<String> activeEmbeds() {
+        if (!dev.anvilcraft.thenextforge.api.TnfApi.hasEmbeddingOverrides()) return embeds;
+        return embeds.stream().filter(dev.anvilcraft.thenextforge.api.TnfApi::builtinEffectsEnabled).toList();
+    }
+
     public boolean hasEmbed(String materialId) {
         return this.embeds.contains(materialId);
     }

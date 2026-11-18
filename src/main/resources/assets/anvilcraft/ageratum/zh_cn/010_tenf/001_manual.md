@@ -9,7 +9,9 @@ navigation:
 ## 准备
 
 1. 把要提升的物品**右键放到铁砧（或砂轮）上**——物品会以展示物的形式立在砧面上。
-2. 手持一把「锤」：<ref item="anvilcraft:anvil_hammer"/>、<ref item="anvilcraft:dragon_rod"/>，或者直接拿一个铁砧本体也可以。
+2. 手持一把**铁砧锤**：<ref item="anvilcraft:anvil_hammer"/>，或它的皇家、浮霜、余烬、超限强化形态
+   （<ref item="anvilcraft:royal_anvil_hammer"/>、<ref item="anvilcraft:frost_anvil_hammer"/>、<ref item="anvilcraft:ember_anvil_hammer"/>、<ref item="anvilcraft:transcendence_anvil_hammer"/>）。
+   龙杖与铁砧本体都不是锤，拿在手里右键不会触发锤击。
 3. 副手可以放一枚**嵌入材料**（可选，见[嵌入材料与取出](003_embed.md)）。
 
 ## 敲下去
@@ -41,8 +43,8 @@ navigation:
 
 | 情况 | 结果 |
 |---|---|
-| 普通铁砧 + 普通锤 | 有概率直接损毁物品 |
-| 使用强化铁砧（如余烬、皇家、超限） | 只掉级，不损毁 |
+| 普通铁砧 + 普通锤 | 掷中损毁概率时直接损毁物品 |
+| 任一侧是超限材质（超限铁砧或超限锤） | 不损毁，改为降级 |
 | 物品内嵌有<ref item="anvilcraft:transcendium_nugget"/> | 损毁改为**归零**（等级清零，物品保住） |
 
 <info>

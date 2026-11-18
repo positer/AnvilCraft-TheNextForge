@@ -23,7 +23,7 @@ public final class ForgeMiningEvents {
         ItemStack tool = player.getMainHandItem();
         ForgingData toolData = tool.get(ModDataComponents.FORGING.get());
 
-        if (player.isUnderWater() && toolData != null && toolData.hasEmbed("minecraft:heart_of_the_sea")) {
+        if (player.isUnderWater() && toolData != null && toolData.hasActiveEmbed("minecraft:heart_of_the_sea")) {
             event.setNewSpeed(event.getNewSpeed() * 5.0F);
         }
         if (player.getAbilities().flying && !player.onGround()
@@ -35,7 +35,7 @@ public final class ForgeMiningEvents {
     private static boolean carriesAmuletEmbed(ServerPlayer player, String material) {
         for (ItemStack stack : player.getInventory().items) {
             ForgingData data = stack.get(ModDataComponents.FORGING.get());
-            if (data != null && data.hasEmbed(material)) return true;
+            if (data != null && data.hasActiveEmbed(material)) return true;
         }
         return false;
     }

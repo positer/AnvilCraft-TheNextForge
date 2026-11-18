@@ -18,6 +18,7 @@ import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 /**
  * 护甲/护符嵌入材料在玩家被攻击时触发的反制效果。
  */
+@EventBusSubscriber(modid = TheNextForge.MOD_ID)
 public final class ForgeDefenceEvents {
     private ForgeDefenceEvents() {
     }
@@ -42,17 +43,25 @@ public final class ForgeDefenceEvents {
         if (!(attacker instanceof LivingEntity living)) return;
 
         ForgingData armour = embeddedArmour(player);
-        if (armour == null) return;
-        if (armour.hasEmbed("anvilcraft:ember_metal_ingot")) {
+        // 设计：余烬与负物质粒的「被攻击」效果是「装甲/护符」，蜘蛛眼与末影珍珠只认装甲
+        boolean ember = (armour != null && armour.hasActiveEmbed("anvilcraft:ember_metal_ingot"))
+            || dev.anvilcraft.thenextforge.forging.EmbedPresence.carried(player, "anvilcraft:ember_metal_ingot");
+        boolean negative = (armour != null && armour.hasActiveEmbed("anvilcraft:negative_matter_nugget"))
+            || dev.anvilcraft.thenextforge.forging.EmbedPresence.carried(player, "anvilcraft:negative_matter_nugget");
+        if (armour == null && !ember && !negative) return;
+        if (ember) {
             living.setRemainingFireTicks(200);
         }
-        if (armour.hasEmbed("minecraft:fermented_spider_eye")) {
+        if (armour != null && armour.hasActiveEmbed("minecraft:fermented_spider_eye")) {
             living.addEffect(new MobEffectInstance(MobEffects.POISON, 100, 0, false, true));
         }
-        if (armour.hasEmbed("anvilcraft:negative_matter_nugget")) {
+        if (negative) {
             living.addEffect(new MobEffectInstance(MobEffects.LEVITATION, 60, 0, false, true));
+            // 设计「漂浮且受到伤害提高 30% 持续 5s」：攻击者也要挂易伤，之前只给了漂浮
+            living.setData(dev.anvilcraft.thenextforge.init.ModAttachments.VULNERABLE_UNTIL.get(),
+                level.getGameTime() + 100L);
         }
-        if (armour.hasEmbed("minecraft:ender_pearl")) {
+        if (armour != null && armour.hasActiveEmbed("minecraft:ender_pearl")) {
             double dx = (living.getRandom().nextDouble() - 0.5) * 26;
             double dz = (living.getRandom().nextDouble() - 0.5) * 26;
             living.teleportTo(living.getX() + dx, living.getY(), living.getZ() + dz);
@@ -62,7 +71,7 @@ public final class ForgeDefenceEvents {
     private static ForgingData embeddedArmour(Player player) {
         for (ItemStack stack : armourSlots(player)) {
             ForgingData data = stack.get(ModDataComponents.FORGING.get());
-            if (data != null && !data.embeds().isEmpty()) return data;
+            if (data != null && !data.activeEmbeds().isEmpty()) return data;
         }
         return null;
     }

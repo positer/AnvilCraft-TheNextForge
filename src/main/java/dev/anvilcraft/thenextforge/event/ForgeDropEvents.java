@@ -28,16 +28,46 @@ public final class ForgeDropEvents {
         if (!(event.getBreaker() instanceof ServerPlayer player)) return;
         ItemStack tool = player.getMainHandItem();
         ForgingData data = tool.get(ModDataComponents.FORGING.get());
-        if (data == null || data.embeds().isEmpty()) return;
 
-        if (data.hasEmbed("anvilcraft:ember_metal_ingot")) {
+        if (data != null && data.hasActiveEmbed("anvilcraft:ember_metal_ingot")) {
             smeltAll(event);
         }
-        if (data.hasEmbed("minecraft:ender_pearl")) {
-            collect(player, event.getDrops());
+        // 设计：浮霜「挖掘不掉落、转化为经验」——方块经验 ×4、最低 1 点（与浮霜铁砧一致）
+        if (data != null && data.hasActiveEmbed("anvilcraft:frost_metal_ingot")) {
+            int baseXp = event.getDroppedExperience();
+            int xp = frostXpFor(baseXp);
             event.getDrops().clear();
-            TheNextForge.LOGGER.info("[TNF] ender_eye embed sent drops to inventory");
+            event.setDroppedExperience(xp);
+            TheNextForge.LOGGER.info("[TNF] frost embed converted block xp {} -> {} (drops cleared)", baseXp, xp);
         }
+        // 设计：末影珍珠的掉落归仓是「工具/护符」两列
+        if (collectsDrops(player)) {
+            int collected = collect(player, event.getDrops());
+            event.getDrops().clear();
+            TheNextForge.LOGGER.info("[TNF] ender_pearl embed sent {} drop(s) to inventory", collected);
+        }
+    }
+
+    /** 浮霜经验倍率：与浮霜铁砧（湮灭）一致——方块经验 ×4，最低 1 点。 */
+    public static final int FROST_XP_MULTIPLIER = 4;
+
+    /** 一个方块被浮霜工具挖掉时给的经验。 */
+    public static int frostXpFor(int blockExperience) {
+        return Math.max(1, blockExperience * FROST_XP_MULTIPLIER);
+    }
+
+    /** 末影珍珠是否让本次挖掘的掉落直接进背包：手持工具或随身护符。 */
+    public static boolean collectsDrops(net.minecraft.world.entity.player.Player player) {
+        ForgingData held = player.getMainHandItem().get(ModDataComponents.FORGING.get());
+        if (held != null && held.hasActiveEmbed("minecraft:ender_pearl")) return true;
+        for (ItemStack stack : player.getInventory().items) {
+            if (stack.isEmpty()) continue;
+            String path = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
+            if (!path.endsWith("_amulet")) continue;
+            ForgingData data = stack.get(ModDataComponents.FORGING.get());
+            if (data != null && data.hasActiveEmbed("minecraft:ender_pearl")) return true;
+        }
+        return false;
     }
 
     private static void smeltAll(BlockDropsEvent event) {

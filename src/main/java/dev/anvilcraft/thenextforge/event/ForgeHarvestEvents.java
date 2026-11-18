@@ -43,7 +43,7 @@ public final class ForgeHarvestEvents {
             if (remaining <= 0) break;
             if (stack.isEmpty() || !stack.isDamageableItem() || stack.getDamageValue() <= 0) continue;
             ForgingData data = stack.get(ModDataComponents.FORGING.get());
-            if (data == null || !data.hasEmbed("minecraft:emerald")) continue;
+            if (data == null || !data.hasActiveEmbed("minecraft:emerald")) continue;
             XpRepair repair = repairForXp(remaining, stack.getDamageValue());
             if (repair.repaired() <= 0) continue;
             stack.setDamageValue(stack.getDamageValue() - repair.repaired());
@@ -86,13 +86,22 @@ public final class ForgeHarvestEvents {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         ItemStack weapon = player.getMainHandItem();
         ForgingData data = weapon.get(ModDataComponents.FORGING.get());
-        if (data == null || !data.hasEmbed("minecraft:lapis_lazuli")) return;
+        if (data == null || !data.hasActiveEmbed("minecraft:lapis_lazuli")) return;
         event.setDroppedExperience(xpBonus(event.getDroppedExperience()));
     }
 
     /** 青金石的击杀经验加成：+20%。 */
     public static int xpBonus(int dropped) {
         return dropped <= 0 ? dropped : dropped + (int) Math.round(dropped * 0.2);
+    }
+
+    /** 青金石 · 装甲/护符 的「获得经验 +20%」：玩家任何来源的经验变化，穿着/携带即可。 */
+    @SubscribeEvent
+    public static void onXpChange(net.neoforged.neoforge.event.entity.player.PlayerXpEvent.XpChange event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (event.getAmount() <= 0) return;
+        if (!carries(player, "minecraft:lapis_lazuli")) return;
+        event.setAmount(xpBonus(event.getAmount()));
     }
 
     /** 黄玉：玩家被雷劈时，携带的黄玉嵌入物品恢复 10 点耐久。 */
@@ -115,7 +124,7 @@ public final class ForgeHarvestEvents {
     public static boolean repairIfTopaz(ItemStack stack) {
         if (stack.isEmpty() || !stack.isDamageableItem()) return false;
         ForgingData data = stack.get(ModDataComponents.FORGING.get());
-        if (data == null || !data.hasEmbed("anvilcraft:topaz")) return false;
+        if (data == null || !data.hasActiveEmbed("anvilcraft:topaz")) return false;
         if (stack.getDamageValue() <= 0) return false;
         stack.setDamageValue(Math.max(0, stack.getDamageValue() - 10));
         return true;
@@ -128,7 +137,7 @@ public final class ForgeHarvestEvents {
         ItemStack tool = player.getMainHandItem();
         ForgingData data = tool.get(ModDataComponents.FORGING.get());
         if (data == null) return;
-        if (data.hasEmbed("anvilcraft:frost_metal_ingot")) {
+        if (data.hasActiveEmbed("anvilcraft:frost_metal_ingot")) {
             player.giveExperiencePoints(1);
         }
     }
@@ -136,13 +145,13 @@ public final class ForgeHarvestEvents {
     private static boolean carries(ServerPlayer player, String material) {
         for (ItemStack stack : player.getInventory().items) {
             ForgingData data = stack.get(ModDataComponents.FORGING.get());
-            if (data != null && data.hasEmbed(material)) return true;
+            if (data != null && data.hasActiveEmbed(material)) return true;
         }
         for (ItemStack stack : player.getInventory().armor) {
             ForgingData data = stack.get(ModDataComponents.FORGING.get());
-            if (data != null && data.hasEmbed(material)) return true;
+            if (data != null && data.hasActiveEmbed(material)) return true;
         }
         ForgingData offhand = player.getOffhandItem().get(ModDataComponents.FORGING.get());
-        return offhand != null && offhand.hasEmbed(material);
+        return offhand != null && offhand.hasActiveEmbed(material);
     }
 }

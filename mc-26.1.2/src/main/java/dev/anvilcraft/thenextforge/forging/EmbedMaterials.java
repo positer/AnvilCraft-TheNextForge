@@ -42,6 +42,9 @@ public final class EmbedMaterials {
 
     private static final java.util.Set<TargetKind> TOOL_AND_WEAPON =
         java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON);
+    /** 设计：钻石/碎片/锭/纸 的耐久倍率只作用于工具/武器/装甲，护符不吃。 */
+    private static final java.util.Set<TargetKind> TOOL_WEAPON_ARMOR =
+        java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR);
     private static final java.util.Set<TargetKind> ALL_KINDS =
         java.util.EnumSet.allOf(TargetKind.class);
 
@@ -49,11 +52,11 @@ public final class EmbedMaterials {
     private static final Map<String, DurabilitySpec> DURABILITY = Map.of(
         "minecraft:gold_nugget", new DurabilitySpec(0.8D, TOOL_AND_WEAPON),
         "minecraft:gold_ingot", new DurabilitySpec(0.8D, TOOL_AND_WEAPON),
-        "minecraft:diamond", new DurabilitySpec(1.3D, ALL_KINDS),
-        "minecraft:netherite_scrap", new DurabilitySpec(1.4D, ALL_KINDS),
-        "minecraft:netherite_ingot", new DurabilitySpec(2.0D, ALL_KINDS),
+        "minecraft:diamond", new DurabilitySpec(1.3D, TOOL_WEAPON_ARMOR),
+        "minecraft:netherite_scrap", new DurabilitySpec(1.4D, TOOL_WEAPON_ARMOR),
+        "minecraft:netherite_ingot", new DurabilitySpec(2.0D, TOOL_WEAPON_ARMOR),
         "anvilcraft:royal_steel_ingot", new DurabilitySpec(1.2D, ALL_KINDS),
-        "minecraft:paper", new DurabilitySpec(0.5D, ALL_KINDS)
+        "minecraft:paper", new DurabilitySpec(0.5D, TOOL_WEAPON_ARMOR)
     );
 
     /** 材料 id → 时运等级。 */
@@ -107,22 +110,25 @@ public final class EmbedMaterials {
         add("minecraft:echo_shard", "回响碎片·回响", true, java.util.EnumSet.of(TargetKind.WEAPON), 0x1B3A4A);
         add("minecraft:fermented_spider_eye", "发酵蜘蛛眼·猛毒", false, java.util.EnumSet.of(TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0x7A2B5A);
         add("minecraft:slime_ball", "粘液球·黏糊", false, java.util.EnumSet.of(TargetKind.WEAPON), 0x7ADB5A);
-        add("minecraft:ender_pearl", "末影珍珠·传送", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0x1FE07A);
+        add("minecraft:ender_pearl", "末影珍珠·传送归仓", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0x1FE07A);
         add("minecraft:heart_of_the_sea", "海洋之心·海洋", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0x3A7ADB);
         add("minecraft:nether_star", "下界之星·辉煌", false, java.util.EnumSet.of(TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0xFFF0A0);
         add("anvilcraft:royal_steel_ingot", "皇家钢锭·皇家", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0xB060FF);
         add("anvilcraft:frost_metal_ingot", "浮霜金属锭·浮霜", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.AMULET), 0x8AD8FF);
-        add("anvilcraft:ember_metal_ingot", "余烬金属锭·余烬", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR), 0xFF7A1A);
+        // 设计：被攻击后攻击者燃烧是「装甲/护符」
+        add("anvilcraft:ember_metal_ingot", "余烬金属锭·余烬", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0xFF7A1A);
         add("anvilcraft:transcendium_nugget", "超限合金粒·超限", true, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0xC060FF);
         add("anvilcraft:cursed_gold_ingot", "诅咒金锭·诅咒", false, java.util.EnumSet.of(TargetKind.AMULET), 0x8A6A00);
         add("anvilcraft:neutronium_ingot", "中子锭·致密", false, java.util.EnumSet.of(TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0xA0A0A0);
-        add("anvilcraft:negative_matter_nugget", "负物质粒·反相湮灭", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON), 0x6A2BA0);
+        // 设计：命中(工具/武器) + 被攻击(装甲/护符)
+        add("anvilcraft:negative_matter_nugget", "负物质粒·反相湮灭", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0x6A2BA0);
         add("anvilcraft:void_matter", "虚空物质·虚无", false, java.util.EnumSet.of(TargetKind.WEAPON, TargetKind.AMULET), 0x101010);
         add("anvilcraft:amber", "琥珀碎片·琥珀封印", false, java.util.EnumSet.of(TargetKind.WEAPON), 0xFFB020);
         add("minecraft:emerald", "绿宝石·苍翠", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0x1FD060);
         add("anvilcraft:sapphire", "蓝宝石·海洋亲和", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0x2050FF);
         add("anvilcraft:ruby", "红宝石·烈焰亲和", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0xFF2040);
-        add("anvilcraft:topaz", "黄玉·雷电亲和", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0xFFD020);
+        // 设计：黄玉只写工具/武器/装甲，护符一列没有它
+        add("anvilcraft:topaz", "黄玉·雷电亲和", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR), 0xFFD020);
         add("#minecraft:logs", "原木·生态", false, java.util.EnumSet.of(TargetKind.TOOL, TargetKind.WEAPON, TargetKind.ARMOR, TargetKind.AMULET), 0x8B5A2B);
         // 设计「铁砧(铁砧)：视为铁砧锤(工具/武器)」——嵌入后该工具/武器同时算作铁砧锤
         // 设计：纸(扩张) 可嵌入槽位+3、最大耐久-50%（工具/武器/装甲）
@@ -152,9 +158,12 @@ public final class EmbedMaterials {
     }
 
     public static void scaleDurability(ItemStack stack, double factor) {
-        Integer max = stack.get(DataComponents.MAX_DAMAGE);
-        if (max == null || max <= 1) return;
-        stack.set(DataComponents.MAX_DAMAGE, Math.max(1, (int) Math.round(max * factor)));
+        int maximum = stack.getMaxDamage();
+        if (maximum <= 1 || !Double.isFinite(factor) || factor <= 0) return;
+        if (ForgeDurability.scaleBaseline(stack, factor)) return;
+        int scaled = (int) Math.max(1L, Math.min(Integer.MAX_VALUE, Math.round(maximum * factor)));
+        stack.set(DataComponents.MAX_DAMAGE, scaled);
+        ForgeDurability.markManaged(stack);
     }
 
     private static void add(String id, String label, boolean unique, java.util.Set<TargetKind> kinds, int color) {
@@ -171,7 +180,7 @@ public final class EmbedMaterials {
      */
     public static boolean glowHighlightApplies(ItemStack tool, ItemStack offhand) {
         ForgingData data = tool.get(dev.anvilcraft.thenextforge.init.ModDataComponents.FORGING.get());
-        if (data == null || !data.hasEmbed("minecraft:glow_ink_sac")) return false;
+        if (data == null || !data.hasActiveEmbed("minecraft:glow_ink_sac")) return false;
         return offhand.getItem() instanceof net.minecraft.world.item.BlockItem;
     }
 
@@ -211,6 +220,8 @@ public final class EmbedMaterials {
 
     /** 按材料 id 查定义。 */
     public static Definition byId(String id) {
+        var dynamic = dev.anvilcraft.thenextforge.api.ManagedEmbeddings.definition(id);
+        if (dynamic != null) return dev.anvilcraft.thenextforge.api.ManagedEmbeddings.materialDefinition(id, dynamic);
         return TABLE.get(id);
     }
 
@@ -228,6 +239,9 @@ public final class EmbedMaterials {
     /** 按对象类型返回该材料的加成文本；kind 为 null 时返回通用描述。 */
     /** 按对象类型返回该材料的加成文本；kind 为 null 时返回通用描述。 */
     public static String bonusText(String id, int level, TargetKind kind) {
+        var dynamic = dev.anvilcraft.thenextforge.api.ManagedEmbeddings.definition(id);
+        if (dynamic != null) return dynamic.enabled() && (kind == null || dynamic.kinds().contains(kind))
+            ? dev.anvilcraft.thenextforge.api.ManagedEmbeddings.describe(dynamic, kind) : "";
         Definition definition = TABLE.get(id);
         if (definition == null) return "";
         if (kind != null && !definition.allows(kind)) return "";
@@ -238,7 +252,7 @@ public final class EmbedMaterials {
                 case WEAPON -> "冷却 -20%";
                 case TOOL -> "急迫 I";
                 case ARMOR -> "速度 I";
-                default -> "急迫 I";
+                default -> "急迫 I 与速度 I";
             };
             case "glow_ink_sac" -> switch (kind) {
                 case WEAPON -> "命中发光 5s";
@@ -251,10 +265,18 @@ public final class EmbedMaterials {
                 case AMULET -> "方块触及 +1 格，实体触及 +1 格";
                 default -> "方块触及 +1 格";
             };
-            case "gold_nugget" -> kind == TargetKind.WEAPON ? "伤害 +30%（最大耐久 -20%）" : "时运 +1";
-            case "gold_ingot" -> kind == TargetKind.WEAPON ? "伤害 +50%（最大耐久 -20%）" : "时运 +3";
+            case "gold_nugget" -> switch (kind) {
+                case WEAPON -> "伤害 +30%（最大耐久 -20%）";
+                case TOOL -> "时运 +1（最大耐久 -20%）";
+                default -> "时运 +1";
+            };
+            case "gold_ingot" -> switch (kind) {
+                case WEAPON -> "伤害 +50%（最大耐久 -20%）";
+                case TOOL -> "时运 +3（最大耐久 -20%）";
+                default -> "时运 +3";
+            };
             case "diamond" -> switch (kind) {
-                case TOOL -> "挖掘等级 +1";
+                case TOOL -> "挖掘等级与钻石镐取并集，耐久 +30%";
                 case WEAPON -> "耐久 +30%";
                 case ARMOR -> "耐久 +30%";
                 case AMULET -> "护甲 +2";
@@ -272,11 +294,11 @@ public final class EmbedMaterials {
             case "ruby" -> kind == TargetKind.AMULET ? "抗火" : "燃烧时每 5s 恢复 2 点耐久";
             case "topaz" -> "电网内每 5s 恢复 2 点耐久，遭雷劈恢复 10 点";
             case "netherite_scrap" -> switch (kind) {
-                case ARMOR -> "护甲 +1";
+                case ARMOR -> "护甲 +1，耐久 +40%";
                 default -> "耐久 +40%";
             };
             case "netherite_ingot" -> switch (kind) {
-                case ARMOR -> "护甲 +3";
+                case ARMOR -> "护甲 +3，耐久 +100%";
                 case AMULET -> "抗性提升 +1（最高 4）";
                 default -> "耐久 +100%";
             };
@@ -288,39 +310,45 @@ public final class EmbedMaterials {
             case "echo_shard" -> "近战命中额外 50% 范围伤害";
             case "fermented_spider_eye" -> switch (kind) {
                 case ARMOR -> "被攻击时攻击者中毒";
-                default -> "命中附加中毒 5s";
+                default -> "命中附加中毒 5s（每嵌入 +1 级）";
             };
             case "oak_log", "logs" -> switch (kind) {
-                case ARMOR, AMULET -> "最大生命值 +1";
+                case ARMOR -> "最大生命值 +1，每 5s 恢复 1 点耐久";
+                case AMULET -> "最大生命值 +1，每 5s 恢复手持物品 1 点耐久";
                 default -> "每 5s 恢复 1 点耐久";
             };
             case "slime_ball" -> "命中降低 50% 移速";
-            case "ender_eye" -> switch (kind) {
-                case WEAPON -> "命中后随机 13 格传送";
+            // 设计 §5 第 4 行（原「末影之眼」，D40 裁定改为末影珍珠）；此前键名写成 ender_eye，
+            // 导致这里一路落到 default，tooltip 只能显示材料名本身。
+            case "ender_pearl" -> switch (kind) {
+                case WEAPON -> "命中后目标随机 13 格传送";
                 case ARMOR -> "被攻击后攻击者随机 13 格传送";
-                default -> "掉落物直接进入背包";
+                default -> "挖掘掉落直接进入背包（优先潜影盒）";
             };
             case "heart_of_the_sea" -> switch (kind) {
                 case WEAPON -> "水中伤害 +75%";
                 case TOOL -> "水下无视挖掘惩罚";
-                default -> "海洋庇佑";
+                default -> "水中获得海洋庇佑";
             };
             case "royal_steel_ingot" -> switch (kind) {
                 case WEAPON -> "伤害 +10%，耐久 +20%";
-                case ARMOR, AMULET -> "护甲 +1，耐久 +20%";
+                case ARMOR -> "护甲 +1，耐久 +20%";
+                case AMULET -> "伤害 +10%，护甲 +1，耐久 +20%";
                 default -> "耐久 +20%";
             };
             case "frost_metal_ingot" -> switch (kind) {
                 case WEAPON -> "每附魔 +5% 伤害";
                 case AMULET -> "每级 +1% 伤害";
-                default -> "副手方块挖掘转经验";
+                default -> "挖掘掉落转化为经验（方块经验 ×4，至少 1 点）";
             };
             case "ember_metal_ingot" -> switch (kind) {
-                case TOOL -> "挖掘自动熔炼";
+                case TOOL -> "挖掘自动熔炼（受时运影响）";
                 case WEAPON -> "火焰附加";
                 default -> "被攻击后攻击者燃烧";
             };
-            case "transcendium_nugget" -> kind == TargetKind.AMULET ? "创造飞行，嵌入槽 +1" : "不毁，嵌入槽 +1，损毁降为等级 0";
+            case "transcendium_nugget" -> kind == TargetKind.AMULET
+                ? "创造飞行，无视飞行挖掘惩罚，嵌入槽 +1，损毁降为等级 0"
+                : "不毁，嵌入槽 +1，损毁降为等级 0";
             case "cursed_gold_ingot" -> "全身装备/护符每诅咒 +5% 伤害";
             case "neutronium_ingot" -> switch (kind) {
                 case WEAPON -> "伤害 +80%，冷却 +30%";
@@ -331,7 +359,7 @@ public final class EmbedMaterials {
                 default -> "命中漂浮且易伤";
             };
             case "void_matter" -> kind == TargetKind.AMULET ? "10% 伤害转虚空" : "30% 伤害转虚空";
-            case "amber" -> "目标怨恨值 +20%";
+            case "amber" -> "命中后基础怨恨值 +20%（上限 100%）";
             case "feather" -> switch (kind) {
                 case WEAPON -> "攻击力 -75%，武器冷却 -75%";
                 default -> "缓降";
@@ -376,6 +404,8 @@ public final class EmbedMaterials {
 
     /** 每种材料提供的额外槽位：内置（超限合金粒 +1、纸 +3）可被数据定义覆盖。 */
     public static int extraSlots(String materialId) {
+        var dynamic = dev.anvilcraft.thenextforge.api.ManagedEmbeddings.definition(materialId);
+        if (dynamic != null) return dynamic.extraSlots();
         int fromData = EmbedData.extraSlots(materialId);
         if (fromData > 0) return fromData;
         return switch (materialId) {
@@ -426,7 +456,7 @@ public final class EmbedMaterials {
 
     /** 全部材料定义，供验收矩阵遍历。 */
     public static java.util.Map<String, Definition> all() {
-        return java.util.Collections.unmodifiableMap(TABLE);
+        return table();
     }
 
     public static Definition of(ItemStack stack) {
@@ -434,6 +464,8 @@ public final class EmbedMaterials {
         String rawId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
         // 设计 L40：数据驱动的黑名单材料不可嵌入
         if (EmbedData.isBlacklisted(rawId)) return null;
+        var mapped = dev.anvilcraft.thenextforge.api.ManagedEmbeddings.definition(rawId);
+        if (mapped != null) return dev.anvilcraft.thenextforge.api.ManagedEmbeddings.materialDefinition(rawId, mapped);
         if (stack.is(net.minecraft.tags.ItemTags.LOGS)) {
             return EmbedData.isBlacklisted("#minecraft:logs") ? null : TABLE.get("#minecraft:logs");
         }
@@ -452,7 +484,16 @@ public final class EmbedMaterials {
 
     /** 内置材料表（只读视图，测试与调试用）。 */
     public static Map<String, Definition> table() {
-        return Map.copyOf(TABLE);
+        if (!dev.anvilcraft.thenextforge.api.TnfApi.hasEmbeddingOverrides()) return Map.copyOf(TABLE);
+        Map<String, Definition> merged = new LinkedHashMap<>(TABLE);
+        for (var item : BuiltInRegistries.ITEM) {
+            String id = BuiltInRegistries.ITEM.getKey(item).toString();
+            var dynamic = dev.anvilcraft.thenextforge.api.TnfApi.embedding(new ItemStack(item));
+            if (dynamic == null) continue;
+            var definition = dev.anvilcraft.thenextforge.api.ManagedEmbeddings.materialDefinition(id, dynamic);
+            if (definition == null) merged.remove(id); else merged.put(id, definition);
+        }
+        return java.util.Collections.unmodifiableMap(merged);
     }
 
     /** 材料 id → 物品栈；未知或无效 id 返回空栈。 */
@@ -507,11 +548,22 @@ public final class EmbedMaterials {
     public static boolean applyForRoles(ItemStack target, Definition definition, int level,
                                         net.minecraft.server.level.ServerLevel serverLevel) {
         if (definition == null) return false;
+        var dynamic = dev.anvilcraft.thenextforge.api.ManagedEmbeddings.definition(definition.id());
+        if (dynamic != null) return dev.anvilcraft.thenextforge.api.ManagedEmbeddings.apply(target, definition.id(), dynamic, TargetKind.rolesOf(target), serverLevel);
         boolean changed = false;
+        // 与锻造等级解耦：归零后再次嵌入同材料也不能覆盖旧条目。
+        String prefix = "embed/" + definition.id().substring(definition.id().indexOf(':') + 1) + "/";
+        int embeddingOrder = dev.anvilcraft.thenextforge.forging.ForgeAttributes.current(target)
+            .modifiers().stream().map(entry -> entry.modifier().id())
+            .filter(id -> id.getNamespace().equals("thenextforge") && id.getPath().startsWith(prefix))
+            .mapToInt(id -> {
+                try { return Integer.parseInt(id.getPath().substring(id.getPath().lastIndexOf('/') + 1)); }
+                catch (NumberFormatException ignored) { return 0; }
+            }).max().orElse(0) + 1;
         boolean durabilityApplied = false;
         for (TargetKind role : TargetKind.rolesOf(target)) {
             if (!definition.allows(role)) continue;
-            changed |= apply(target, definition, role, level, serverLevel, !durabilityApplied);
+            changed |= apply(target, definition, role, embeddingOrder, serverLevel, !durabilityApplied);
             durabilityApplied = true;
         }
         return changed;
@@ -521,12 +573,18 @@ public final class EmbedMaterials {
      * 多重角色对象的加成描述：把各角色的描述并起来并去重（设计 L41）。
      */
     public static String bonusTextFor(ItemStack stack, String id, int level) {
+        String frozen = dev.anvilcraft.thenextforge.api.ManagedEmbeddings.describeApplied(stack, id);
+        if (!frozen.isBlank()) return frozen;
         java.util.LinkedHashSet<String> texts = new java.util.LinkedHashSet<>();
         for (TargetKind role : TargetKind.rolesOf(stack)) {
             String text = bonusText(id, level, role);
             if (text != null && !text.isBlank()) texts.add(text);
         }
-        return String.join("，", texts);
+        String joined = String.join("，", texts);
+        // 设计把发光墨囊/回响碎片/金胡萝卜/纸/超限金属粒 标为「唯一嵌入」，tooltip 要能看出来
+        Definition definition = byId(id);
+        return definition != null && definition.unique() && !joined.isBlank()
+            ? joined + "（唯一嵌入）" : joined;
     }
 
     /**
@@ -564,7 +622,8 @@ public final class EmbedMaterials {
             }
             case "minecraft:redstone" -> {
                 if (kind == TargetKind.WEAPON) {
-                    add("minecraft:redstone", target, Attributes.ATTACK_SPEED, 0.2, AttributeModifier.Operation.ADD_MULTIPLIED_BASE, "embed_redstone", level);
+                    // 设计「武器冷却 -20%」：冷却 = 1/攻速，所以攻速要 ×1.25（MULTIPLIED_TOTAL 落在最终值上）
+                    add("minecraft:redstone", target, Attributes.ATTACK_SPEED, 0.25, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL, "embed_redstone", level);
                     yield true;
                 }
                 yield true;
@@ -649,15 +708,17 @@ public final class EmbedMaterials {
                 if (kind == TargetKind.WEAPON) {
                     add("minecraft:feather", target, Attributes.ATTACK_DAMAGE, -0.75,
                         AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL, "embed_feather_damage", level);
-                    add("minecraft:feather", target, Attributes.ATTACK_SPEED, 0.75,
+                    // 设计「武器冷却 -75%」：攻速 ×4 ⇒ MULTIPLIED_TOTAL +3.0
+                    add("minecraft:feather", target, Attributes.ATTACK_SPEED, 3.0,
                         AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL, "embed_feather_speed", level);
                 }
                 yield true;
             }
             case "minecraft:heavy_core" -> {
                 if (kind == TargetKind.WEAPON) {
+                    // 设计「击退 +150%」是倍率，不是绝对值
                     add("minecraft:heavy_core", target, Attributes.ATTACK_KNOCKBACK, 1.5,
-                        AttributeModifier.Operation.ADD_VALUE, "embed_heavy_knockback", level);
+                        AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL, "embed_heavy_knockback", level);
                     add("minecraft:heavy_core", target, Attributes.ATTACK_SPEED, -1.0 / 3.0,
                         AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL, "embed_heavy_speed", level);
                 }
@@ -679,7 +740,6 @@ public final class EmbedMaterials {
                 if (allowDurability && durabilityApplies("minecraft:paper", kind)) scaleDurability(target, durabilityFactor("minecraft:paper", kind));
                 yield true;
             }
-            // 设计：铁砧(铁砧) 视为铁砧锤——判定在 ForgingMaterial.ofHammer，这里只登记可嵌入
             case "anvilcraft:transcendium_nugget" -> {
                 target.set(net.minecraft.core.component.DataComponents.UNBREAKABLE, net.minecraft.util.Unit.INSTANCE);
                 yield true;
@@ -687,7 +747,8 @@ public final class EmbedMaterials {
             case "anvilcraft:neutronium_ingot" -> {
                 if (kind == TargetKind.WEAPON) {
                     add("anvilcraft:neutronium_ingot", target, Attributes.ATTACK_DAMAGE, 0.8, AttributeModifier.Operation.ADD_MULTIPLIED_BASE, "embed_neutronium_damage", level);
-                    add("anvilcraft:neutronium_ingot", target, Attributes.ATTACK_SPEED, -0.3, AttributeModifier.Operation.ADD_MULTIPLIED_BASE, "embed_neutronium_speed", level);
+                    // 设计「武器冷却 +30%」：攻速 ×(1/1.3)，即 MULTIPLIED_TOTAL -(1 - 1/1.3)
+                    add("anvilcraft:neutronium_ingot", target, Attributes.ATTACK_SPEED, -(1.0D - 1.0D / 1.3D), AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL, "embed_neutronium_speed", level);
                 }
                 if (kind == TargetKind.ARMOR || kind == TargetKind.AMULET) {
                     add("anvilcraft:neutronium_ingot", target, Attributes.ARMOR, 2.0, AttributeModifier.Operation.ADD_VALUE, "embed_neutronium", level);
@@ -718,6 +779,9 @@ public final class EmbedMaterials {
     public static void upgradeMiningTier(ItemStack stack) {
         net.minecraft.world.item.component.Tool current = stack.get(DataComponents.TOOL);
         if (current == null) return;
+        if (!stack.has(dev.anvilcraft.thenextforge.init.ModDataComponents.PRE_EMBED_TOOL.get())) {
+            stack.set(dev.anvilcraft.thenextforge.init.ModDataComponents.PRE_EMBED_TOOL.get(), current);
+        }
         // 26.1.2：注册表的 tag 查询返回 Optional，显式给出 HolderSet<Block> 类型
         net.minecraft.core.HolderSet<net.minecraft.world.level.block.Block> mineable =
             net.minecraft.core.registries.BuiltInRegistries.BLOCK
@@ -757,9 +821,7 @@ public final class EmbedMaterials {
         String key,
         int level
     ) {
-        ItemAttributeModifiers current = stack.getOrDefault(
-            DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY
-        );
+        ItemAttributeModifiers current = dev.anvilcraft.thenextforge.forging.ForgeAttributes.current(stack);
         // id 里带材料名：取出材料时按前缀一次撤干净
         String materialPath = materialId.substring(materialId.indexOf(':') + 1);
         Identifier id = Identifier.fromNamespaceAndPath(
@@ -768,7 +830,8 @@ public final class EmbedMaterials {
         stack.set(DataComponents.ATTRIBUTE_MODIFIERS, current.withModifierAdded(
             attribute,
             new AttributeModifier(id, amount, operation),
-            EquipmentSlotGroup.MAINHAND
+            TargetKind.of(stack) == TargetKind.ARMOR ? EquipmentSlotGroup.ARMOR
+                : TargetKind.of(stack) == TargetKind.AMULET ? EquipmentSlotGroup.BODY : EquipmentSlotGroup.MAINHAND
         ));
     }
 }

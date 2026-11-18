@@ -40,6 +40,7 @@ public final class EmbedData {
     private static final Path FILE = Path.of("config", "thenextforge", "embed_materials.json");
 
     private static final Map<String, Spec> SPECS = new LinkedHashMap<>();
+    private static final Map<String, EmbedMaterials.Definition> REPLACED = new LinkedHashMap<>();
     private static final Set<String> REGISTERED = new java.util.LinkedHashSet<>();
     private static final Set<String> BLACKLIST = new java.util.LinkedHashSet<>();
 
@@ -47,6 +48,8 @@ public final class EmbedData {
     }
 
     /** 已加载的数据定义。 */
+    public static Spec spec(String id) { return SPECS.get(id); }
+
     public static Map<String, Spec> specs() {
         return Map.copyOf(SPECS);
     }
@@ -65,6 +68,7 @@ public final class EmbedData {
     /** 第三方注册入口：新增或覆盖一个材料。 */
     public static void register(String materialId, Spec spec) {
         if (materialId == null || materialId.isBlank() || spec == null) return;
+        if (!SPECS.containsKey(materialId) && EmbedMaterials.hasDefinition(materialId)) REPLACED.put(materialId, EmbedMaterials.table().get(materialId));
         SPECS.put(materialId, spec);
         if (!EmbedMaterials.hasDefinition(materialId)) REGISTERED.add(materialId);
         EmbedMaterials.registerDefinition(new EmbedMaterials.Definition(
@@ -81,6 +85,8 @@ public final class EmbedData {
     public static void clear() {
         for (String id : REGISTERED) EmbedMaterials.removeDefinition(id);
         REGISTERED.clear();
+        REPLACED.values().forEach(EmbedMaterials::registerDefinition);
+        REPLACED.clear();
         SPECS.clear();
         BLACKLIST.clear();
     }

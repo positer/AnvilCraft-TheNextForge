@@ -1,21 +1,19 @@
 package dev.anvilcraft.thenextforge;
 
-import dev.anvilcraft.lib.v2.config.BoundedDiscrete;
 import dev.anvilcraft.lib.v2.config.Comment;
 import dev.anvilcraft.lib.v2.config.Config;
 
+/**
+ * 本模组的配置。
+ *
+ * <p>模型放大和品质词缀均为实验性开关，默认关闭；
+ * 关闭时一律不放大，但锻造的数值与效果完全不受影响。
+ */
 @Config(name = TheNextForge.MOD_ID)
 public class AddonConfig {
-    @Comment("Whether to log the dirt block on common setup")
-    public boolean logDirtBlock = false;
-
-    @Comment("实验性：被锻造的物品在手持、物品栏、第三人称与掉落物形态下统一放大（关闭后一律不放大，不影响任何数值效果）")
+    @Comment("Experimental: scale forged items in hand, inventory, third person and as dropped items. Off means no scaling at all; forging stats and effects are unaffected.")
     public boolean experimentalModelScaling = false;
 
-    @Comment("A magic number")
-    @BoundedDiscrete(max = 24, min = 2)
-    public int magicNumber = 2;
-
-    @Comment("What you want the introduction message to be for the magic number")
-    public String magicNumberIntroduction = "";
+    @Comment("Experimental: replace the name with a quality affix on each upgrade. Anvils can rename it until the next upgrade. Disabling leaves existing names unchanged.")
+    public boolean experimentalQualityAffixes = false;
 }

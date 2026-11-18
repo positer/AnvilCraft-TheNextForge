@@ -34,13 +34,11 @@ public final class ForgeJeiPlugin implements IModPlugin {
 
     @Override
     public void registerRecipeCatalysts(mezz.jei.api.registration.IRecipeCatalystRegistration registration) {
-        // 铁砧/砂轮/铁砧锤点「用途」时能看到这一页
-        registration.addRecipeCatalyst(new ItemStack(net.minecraft.world.item.Items.ANVIL),
-            dev.anvilcraft.thenextforge.client.ForgeEmbedCategory.TYPE);
-        registration.addRecipeCatalyst(new ItemStack(net.minecraft.world.item.Items.GRINDSTONE),
-            dev.anvilcraft.thenextforge.client.ForgeEmbedCategory.TYPE);
-        registration.addRecipeCatalyst(new ItemStack(net.minecraft.world.item.Items.PAPER),
-            dev.anvilcraft.thenextforge.client.ForgeEmbedCategory.TYPE);
+        // 工作方块索引：原版铁砧/砂轮 + 铁砧工艺本体的四档变体与五把铁砧锤。
+        // 清单集中在 EmbedCatalysts，避免这里再手写一遍。
+        for (ItemStack catalyst : EmbedCatalysts.stacks()) {
+            registration.addRecipeCatalyst(catalyst, ForgeEmbedCategory.TYPE);
+        }
     }
 
     @Override

@@ -41,6 +41,7 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 // 测试与验证用的类只在开发环境编译运行，发行包里不带这些类
 tasks.named('jar') {
     exclude 'dev/anvilcraft/thenextforge/gametest/**'
+    exclude 'data/thenextforge_api_probe/**'
     exclude 'dev/anvilcraft/thenextforge/command/**'
     exclude 'dev/anvilcraft/thenextforge/event/ForgeDebugDump.class'
     exclude 'dev/anvilcraft/thenextforge/event/ForgeDebugDump$*.class'
@@ -67,4 +68,15 @@ idea {
 
 lombok {
     version = "1.18.34"
+}
+
+// 独立附属源码只依赖发行 JAR，防止示例意外依赖 main 输出或开发测试类。
+tasks.register('compileApiExample', JavaCompile) {
+    dependsOn tasks.named('jar')
+    source fileTree("$rootDir/examples/api-addon-1.21.1") { include '**/*.java' }
+    classpath = files(tasks.named('jar').flatMap { it.archiveFile }) + configurations.compileClasspath
+    destinationDirectory = layout.buildDirectory.dir('api-example-classes')
+    javaCompiler = javaToolchains.compilerFor { languageVersion = java.toolchain.languageVersion }
+    options.encoding = 'UTF-8'
+    options.compilerArgs += ['-proc:none']
 }

@@ -44,32 +44,44 @@ public final class Amulets {
      *
      * <p>升级过的护符放在展示框里也应当生效：每个等级提供 {@link ForgingRules#AMULET_LEVEL_BONUS} 的成功率。
      */
-    public static int totalLevel(ServerLevel level, BlockPos pos) {
-        int total = 0;
-        for (ItemFrame frame : level.getEntitiesOfClass(ItemFrame.class, new AABB(pos).inflate(1.5))) {
+    public record Snapshot(Set<String> effects, int totalLevel) { }
+
+    /** 一次空间查询，只认贴在该基底四个侧面的展示框；同名护符去重。 */
+    public static Snapshot scan(ServerLevel level, BlockPos pos) {
+        java.util.Map<String, Integer> levels = new java.util.HashMap<>();
+        java.util.Set<String> nativeEffects = new java.util.HashSet<>();
+        java.util.Set<net.minecraft.core.Direction> faces = new java.util.HashSet<>();
+        var frames = level.getEntitiesOfClass(ItemFrame.class, new AABB(pos).inflate(1.5));
+        frames.sort(java.util.Comparator.comparing(frame -> frame.getDirection().ordinal()));
+        for (ItemFrame frame : frames) {
+            var direction = frame.getDirection();
+            if (!direction.getAxis().isHorizontal()
+                || !frame.getPos().relative(direction.getOpposite()).equals(pos)
+                || faces.contains(direction)) continue;
             ItemStack item = frame.getItem();
-            if (item.isEmpty()) continue;
-            String path = BuiltInRegistries.ITEM.getKey(item.getItem()).getPath();
-            if (!path.endsWith("_amulet")) continue;
+            if (item.isEmpty() || !ForgeRulesData.isAmuletAllowed(item)) continue;
+            var id = BuiltInRegistries.ITEM.getKey(item.getItem());
+            String path = id.getPath();
+            if (TargetKind.of(item) != TargetKind.AMULET) continue;
+            faces.add(direction);
+            boolean nativeAmulet = id.getNamespace().equals("anvilcraft") && path.endsWith("_amulet");
+            String name = nativeAmulet ? path.substring(0, path.length() - "_amulet".length()) : id.toString();
+            if (nativeAmulet) nativeEffects.add(name);
             ForgingData data = item.get(dev.anvilcraft.thenextforge.init.ModDataComponents.FORGING.get());
-            if (data == null) continue;
-            for (ForgingLine line : ForgingLine.values()) {
-                total += data.level(line);
-            }
+            int highest = data == null ? 0 : Math.max(data.anvilLevel(), data.grindstoneLevel());
+            levels.merge(name, highest, Math::max);
+            if (faces.size() == 4) break;
         }
-        return total;
+        return new Snapshot(Set.copyOf(filterAllowed(expand(nativeEffects))),
+            levels.values().stream().mapToInt(Integer::intValue).sum());
+    }
+
+    public static int totalLevel(ServerLevel level, BlockPos pos) {
+        return scan(level, pos).totalLevel();
     }
 
     public static Set<String> collect(ServerLevel level, BlockPos pos) {
-        Set<String> found = new HashSet<>();
-        for (ItemFrame frame : level.getEntitiesOfClass(ItemFrame.class, new AABB(pos).inflate(1.5))) {
-            ItemStack item = frame.getItem();
-            if (item.isEmpty()) continue;
-            String path = BuiltInRegistries.ITEM.getKey(item.getItem()).getPath();
-            if (!path.endsWith("_amulet")) continue;
-            found.add(path.substring(0, path.length() - "_amulet".length()));
-        }
-        return filterAllowed(expand(found));
+        return scan(level, pos).effects();
     }
 
     /** 设计 L91：按数据驱动的黑白名单过滤护符（按 `anvilcraft:<名字>_amulet` 匹配）。 */

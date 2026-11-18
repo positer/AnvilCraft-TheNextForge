@@ -29,6 +29,60 @@ public final class CombatEffects {
         return 1.0F + 0.05F * Math.max(0, enchantCount) + 0.01F * Math.max(0, playerLevel);
     }
 
+    /** 一件物品上某材料的嵌入数量。 */
+    public static int countEmbeds(ForgingData data, String materialId) {
+        if (data == null) return 0;
+        return (int) data.activeEmbeds().stream().filter(materialId::equals).count();
+    }
+
+    /** 玩家随身护符（背包里 *_amulet 的物品）上某材料的总嵌入数。 */
+    public static int carriedAmuletEmbeds(Player player, String materialId) {
+        if (player == null) return 0;
+        int count = 0;
+        for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
+            if (stack.isEmpty()) continue;
+            String path = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
+            if (!path.endsWith("_amulet")) continue;
+            count += countEmbeds(stack.get(dev.anvilcraft.thenextforge.init.ModDataComponents.FORGING.get()), materialId);
+        }
+        return count;
+    }
+
+    /** 粘液球减速的修饰符 id（与属性修饰符同一套命名）。 */
+    public static final net.minecraft.resources.Identifier SLIME_SLOW_ID =
+        net.minecraft.resources.Identifier.fromNamespaceAndPath("thenextforge", "embed/slime_ball/slow");
+
+    /** 待摘除的粘液球减速：实体 → 到期游戏刻。 */
+    private static final java.util.Map<LivingEntity, Long> SLIME_SLOW_UNTIL = new java.util.WeakHashMap<>();
+
+    /**
+     * 粘液球：移速 ×0.5，持续 ticks。
+     *
+     * <p>缓慢效果最接近的是 II(-30%) / III(-45%) / IV(-60%)，都凑不出设计的 50%，
+     * 所以直接挂 MOVEMENT_SPEED 的瞬态修饰符，并在到期后摘掉。
+     */
+    public static void applySlimeSlow(LivingEntity target, int ticks) {
+        if (target == null || target.level().isClientSide()) return;
+        var speed = target.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
+        if (speed == null) return;
+        if (speed.getModifier(SLIME_SLOW_ID) == null) {
+            speed.addTransientModifier(new net.minecraft.world.entity.ai.attributes.AttributeModifier(
+                SLIME_SLOW_ID, -0.5D, net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+        }
+        SLIME_SLOW_UNTIL.put(target, target.level().getGameTime() + ticks);
+    }
+
+    /** 每 tick 由事件钩子调用：到期的粘液球减速摘掉。 */
+    public static void expireSlimeSlow(net.minecraft.world.entity.Entity entity) {
+        if (!(entity instanceof LivingEntity target)) return;
+        Long until = SLIME_SLOW_UNTIL.get(target);
+        if (until == null) return;
+        if (target.level().getGameTime() < until) return;
+        SLIME_SLOW_UNTIL.remove(target);
+        var speed = target.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
+        if (speed != null) speed.removeModifier(SLIME_SLOW_ID);
+    }
+
     /** 海洋之心：水中造成伤害 +75%。 */
     public static float heartOfTheSeaDamage(float damage, boolean inWater) {
         return inWater ? damage * 1.75F : damage;
@@ -36,9 +90,11 @@ public final class CombatEffects {
 
     public static void applyOnHit(ServerLevel level, Player attacker, LivingEntity target, ItemStack weapon, float damage) {
         ForgingData data = weapon.get(dev.anvilcraft.thenextforge.init.ModDataComponents.FORGING.get());
-        if (data == null || data.embeds().isEmpty()) return;
+        if (data == null) data = ForgingData.EMPTY;
+        // 武器上没嵌入也要往下走：设计里「中毒」这类效果护符单独也能给
+        if (data.activeEmbeds().isEmpty() && carriedAmuletEmbeds(attacker, "minecraft:fermented_spider_eye") == 0) return;
 
-        if (data.hasEmbed("minecraft:echo_shard")) {
+        if (data.hasActiveEmbed("minecraft:echo_shard")) {
             float echoDamage = damage * 0.5F;
             target.hurt(level.damageSources().magic(), echoDamage);
             // 范围伤害：目标周围 2 格内的其他生物同样承受 50%
@@ -60,35 +116,38 @@ public final class CombatEffects {
                     2, 0.1, 0.1, 0.1, 0.01);
             }
         }
-        if (data.hasEmbed("minecraft:fermented_spider_eye")) {
-            int count = (int) data.embeds().stream().filter("minecraft:fermented_spider_eye"::equals).count();
-            target.addEffect(new MobEffectInstance(MobEffects.POISON, 100, Math.max(0, count - 1), false, true));
+        // 设计：中毒「武器/护符」都算 —— 武器上的嵌入 + 随身护符上的嵌入一起数，每个 +1 级
+        int spiderEyes = countEmbeds(data, "minecraft:fermented_spider_eye")
+            + carriedAmuletEmbeds(attacker, "minecraft:fermented_spider_eye");
+        if (spiderEyes > 0) {
+            target.addEffect(new MobEffectInstance(MobEffects.POISON, 100, spiderEyes - 1, false, true));
         }
-        if (data.hasEmbed("minecraft:slime_ball")) {
-            target.addEffect(new MobEffectInstance(MobEffects.SLOWNESS, 100, 1, false, true));
+        if (data.hasActiveEmbed("minecraft:slime_ball")) {
+            // 设计「命中降低 50% 移速」：缓慢 II 只有 -30%，这里用瞬态修饰符精确 -50%
+            applySlimeSlow(target, 100);
         }
-        if (data.hasEmbed("anvilcraft:negative_matter_nugget")) {
+        if (data.hasActiveEmbed("anvilcraft:negative_matter_nugget")) {
             target.addEffect(new MobEffectInstance(MobEffects.LEVITATION, 60, 0, false, true));
             var vulnerable = dev.anvilcraft.thenextforge.init.ModAttachments.VULNERABLE_UNTIL.get();
             target.setData(vulnerable, level.getGameTime() + 100L);
         }
-        if (data.hasEmbed("minecraft:ender_eye")) {
+        if (data.hasActiveEmbed("minecraft:ender_pearl")) {
             double dx = (target.getRandom().nextDouble() - 0.5) * 26;
             double dz = (target.getRandom().nextDouble() - 0.5) * 26;
             target.teleportTo(target.getX() + dx, target.getY(), target.getZ() + dz);
             level.sendParticles(ParticleTypes.PORTAL, target.getX(), target.getY() + 1, target.getZ(), 24, 0.4, 0.4, 0.4, 0.3);
         }
-        if (data.hasEmbed("anvilcraft:ember_metal_ingot")) {
+        if (data.hasActiveEmbed("anvilcraft:ember_metal_ingot")) {
             target.setRemainingFireTicks(200);
         }
         // 设计：凋零玫瑰 —— 命中目标获得 5s 凋零（工具/武器）
-        if (data.hasEmbed("minecraft:wither_rose")) {
+        if (data.hasActiveEmbed("minecraft:wither_rose")) {
             target.addEffect(new MobEffectInstance(MobEffects.WITHER, 100, 0, false, true));
         }
-        if (data.hasEmbed("minecraft:glow_ink_sac")) {
+        if (data.hasActiveEmbed("minecraft:glow_ink_sac")) {
             target.addEffect(new MobEffectInstance(MobEffects.GLOWING, 100, 0, false, false));
         }
-        if (data.hasEmbed("minecraft:heart_of_the_sea") && attacker.isInWater()) {
+        if (data.hasActiveEmbed("minecraft:heart_of_the_sea") && attacker.isInWater()) {
             target.hurt(level.damageSources().magic(), damage * 0.75F);
         }
         // 纯函数入口见 heartOfTheSeaDamage，供测试断言

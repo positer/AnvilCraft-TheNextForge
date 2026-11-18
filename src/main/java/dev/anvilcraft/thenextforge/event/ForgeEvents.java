@@ -188,7 +188,7 @@ public final class ForgeEvents {
             TheNextForge.LOGGER.info("[TNF] forge place attempt kind={} stack={}", kind, mainHand);
             if (kind == null) return;
             // 砂轮的限制不再挡放置：允许放上去（这样才能用海绵芽取出嵌入），到真正锤击升级时才提示
-            if (line == ForgingLine.GRINDSTONE && !kind.canUseGrindstone()) {
+            if (line == ForgingLine.GRINDSTONE && !dev.anvilcraft.thenextforge.api.TnfApi.canUseLine(mainHand, line)) {
                 TheNextForge.LOGGER.info("[TNF] placed a non-grindstone target on a grindstone (upgrade will be refused)");
             }
             String name = mainHand.getHoverName().getString();
